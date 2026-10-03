@@ -1,0 +1,18 @@
+{
+  "name": "Раскладка пола",
+  "short_name": "Раскладка",
+  "description": "Карта раскладки пола для укладчика: этаж из комнат, ёлочка, палуба, квадраты, рамка и вставки, подрезки у стен и расход.",
+  "lang": "ru",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#e8ecf0",
+  "theme_color": "#1d6bd6",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

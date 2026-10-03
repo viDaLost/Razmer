@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="ru" class="site">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Раскладка пола</title>
+<meta name="description" content="Карта раскладки пола для укладчика: этаж из комнат, ёлочка, французская ёлочка, палуба, квадраты, рамка и вставки, подрезки у стен и расход.">
+<meta name="theme-color" content="#1d6bd6" data-site>
+<link rel="manifest" href="manifest.webmanifest" data-site>
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml" data-site>
+<link rel="apple-touch-icon" href="icons/icon-192.png" data-site>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Unbounded:wght@600;700&display=swap">
+<style>
+/* Layout: монтажный планшет — слева шаги 1→4, справа карта пола с полосой инструментов сверху и строкой состояния снизу; на телефоне карта сверху, панель снизу, между ними разделитель. Ничего не лежит поверх карты. */
+:root{
+  --paper:#e8ecf0;
+  --panel:#ffffff;
+  --panel-2:#f2f4f7;
+  --ink:#17212b;
+  --muted:#5a6673;
+  --line:#d2d9e0;
+  --chalk:#1d6bd6;
+  --chalk-soft:#dde9fb;
+  --on-chalk:#ffffff;
+  --tape:#efb300;
+  --tape-soft:#fff2c2;
+  --tape-ink:#5a4400;
+  --bad:#cf3b2a;
+  --bad-soft:#fde2de;
+  --good:#22815a;
+  --good-soft:#dcf2e7;
+  --canvas:#dde3e9;
+  --grid:#cbd3db;
+  --wall:#26303a;
+  --gapzone:#c2cad3;
+  --sch-a:#f6f3ec;
+  --sch-b:#e4ddcf;
+  --seam:rgba(45,33,22,.55);
+  --shadow:0 10px 30px rgba(20,30,40,.18);
+  --font-display:"Unbounded","Golos Text",system-ui,sans-serif;
+  --font-body:"Golos Text",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --in-size:15px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#10151a; --panel:#182029; --panel-2:#1f2832; --ink:#e2e8ee; --muted:#97a3b0; --line:#2a3440;
+    --chalk:#5c9eff; --chalk-soft:#1a2b44; --on-chalk:#0b1420; --tape:#f4c230; --tape-soft:#3a3114; --tape-ink:#ffe089;
+    --bad:#ff6e5b; --bad-soft:#43211c; --good:#4cc38a; --good-soft:#163427; --canvas:#0c1115; --grid:#1a222a; --wall:#d4dbe2;
+    --gapzone:#26303a; --sch-a:#3b4047; --sch-b:#30353c; --seam:rgba(0,0,0,.6); --shadow:0 10px 30px rgba(0,0,0,.5);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#10151a; --panel:#182029; --panel-2:#1f2832; --ink:#e2e8ee; --muted:#97a3b0; --line:#2a3440;
+  --chalk:#5c9eff; --chalk-soft:#1a2b44; --on-chalk:#0b1420; --tape:#f4c230; --tape-soft:#3a3114; --tape-ink:#ffe089;
+  --bad:#ff6e5b; --bad-soft:#43211c; --good:#4cc38a; --good-soft:#163427; --canvas:#0c1115; --grid:#1a222a; --wall:#d4dbe2;
+  --gapzone:#26303a; --sch-a:#3b4047; --sch-b:#30353c; --seam:rgba(0,0,0,.6); --shadow:0 10px 30px rgba(0,0,0,.5);
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.45 var(--font-body);-webkit-font-smoothing:antialiased;overflow:hidden}
+.site body{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+[hidden]{display:none!important}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--chalk);outline-offset:2px}
+.app{height:100%;display:flex;flex-direction:column}
+
+/* шапка */
+.top{display:flex;align-items:center;gap:10px;padding:6px 14px;background:var(--panel);border-bottom:1px solid var(--line);min-height:50px;box-sizing:border-box;flex:none}
+.brand{display:flex;align-items:center;gap:8px;flex:none}
+.brand svg{width:28px;height:28px;flex:none}
+.brand b{font-family:var(--font-display);font-weight:700;font-size:15px;letter-spacing:.01em}
+.proj{flex:1;min-width:0}
+.proj input{width:100%;box-sizing:border-box;border:1px solid transparent;background:transparent;font-weight:600;font-size:14px;padding:7px 9px;border-radius:8px;text-overflow:ellipsis}
+.proj input:hover{background:var(--panel-2)}
+.proj input:focus{background:var(--panel-2);border-color:var(--line);outline:none}
+.top-actions{display:flex;gap:6px;flex:none}
+
+/* рабочая область */
+.work{flex:1;min-height:0;display:grid;grid-template-columns:minmax(340px,410px) minmax(0,1fr)}
+.panel{grid-column:1;grid-row:1;overflow:auto;background:var(--panel);border-right:1px solid var(--line);min-width:0;min-height:0;overscroll-behavior:contain}
+.mapcol{grid-column:2;grid-row:1;display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--canvas)}
+.splitter{display:none}
+.mapbar{flex:none;display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none}
+.mapbar::-webkit-scrollbar{display:none}
+.mapbar-r{display:flex;gap:2px;margin-left:auto;flex:none}
+.stage{position:relative;flex:1;min-height:0}
+#plan{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab}
+#plan.m-pattern{cursor:move}
+#plan.m-walls{cursor:crosshair}
+#plan.m-rooms{cursor:move}
+.mapfoot{flex:none;background:var(--panel);border-top:1px solid var(--line);padding:6px 10px 7px;display:grid;gap:5px}
+.pills{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;min-width:0}
+.pills::-webkit-scrollbar{display:none}
+.msg{font-size:12.5px;line-height:1.35;color:var(--muted);min-height:17px;text-wrap:pretty}
+.msg.bad{color:var(--bad)}
+@media (max-width:900px){ .msg{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden} .mapfoot{padding:5px 10px 6px} }
+.msg.ok{color:var(--good)}
+.nudge{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
+.nudge-t{font-size:12.5px;color:var(--muted);min-width:0;flex:1 1 140px}
+@media (max-width:560px){ .nudge{flex-wrap:nowrap} .nudge-t{display:none} .pad button{width:44px} }
+.nudge-t b{color:var(--ink)}
+.pad{display:flex;gap:4px}
+.pad button{appearance:none;width:38px;height:34px;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);cursor:pointer;display:grid;place-items:center}
+.pad button:hover{border-color:var(--muted)}
+.pad button[disabled]{opacity:.35;cursor:default}
+.pad svg{width:18px;height:18px}
+
+@media (max-width:900px){
+  :root{--in-size:16px}
+  .work{display:flex;flex-direction:column}
+  .mapcol{order:0;flex:none;height:var(--mapH,46%);min-height:160px}
+  .splitter{order:1;display:flex;flex:none;height:18px;align-items:center;justify-content:center;background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line);cursor:row-resize;touch-action:none}
+  .splitter span{width:44px;height:4px;border-radius:2px;background:var(--line)}
+  .splitter:hover span,.splitter:focus-visible span{background:var(--muted)}
+  .panel{order:2;flex:1;border-right:0}
+  .brand b{display:none}
+  .top{padding:6px 10px}
+}
+@media (max-width:560px){ .btn .t-long{display:none} .tbtn .t-opt{display:none} }
+@media (max-width:480px){ .modes .tbtn:not([aria-pressed="true"]) .lbl{display:none} .modes .tbtn{padding:7px 8px} .mapbar{gap:4px} }
+
+/* кнопки */
+.btn{appearance:none;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-weight:600;font-size:13px;padding:8px 12px;border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;line-height:1.2;white-space:nowrap;min-height:36px;box-sizing:border-box}
+.btn:hover{background:var(--panel-2)}
+.btn.primary{background:var(--chalk);border-color:var(--chalk);color:var(--on-chalk)}
+.btn.primary:hover{filter:brightness(1.07)}
+.btn.small{padding:6px 10px;font-size:12.5px;min-height:32px}
+.btn.wide{width:100%}
+.btn.danger{color:var(--bad)}
+.btn svg{width:16px;height:16px;flex:none}
+.btn[disabled]{opacity:.55;cursor:default}
+.icon{appearance:none;border:0;background:transparent;color:var(--muted);width:32px;height:32px;border-radius:7px;display:grid;place-items:center;cursor:pointer;flex:none}
+.icon:hover{background:var(--panel-2);color:var(--ink)}
+.icon[disabled]{opacity:.35;cursor:default}
+.icon svg{width:16px;height:16px}
+.tbtn{appearance:none;border:0;background:none;padding:7px 9px;border-radius:7px;font-size:12.5px;font-weight:600;color:var(--muted);display:inline-flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap}
+.tbtn:hover{color:var(--ink);background:var(--panel-2)}
+.tbtn svg{width:16px;height:16px;flex:none}
+.tbtn[aria-pressed="true"]{background:var(--ink);color:var(--panel)}
+.modes{display:flex;gap:2px;padding:2px;border-radius:9px;background:var(--panel-2);flex:none}
+
+/* вкладки */
+.tabs{position:sticky;top:0;z-index:3;display:grid;grid-template-columns:repeat(4,1fr);background:var(--panel);border-bottom:1px solid var(--line)}
+.tab{appearance:none;border:0;background:none;padding:10px 4px 9px;font-weight:600;font-size:13px;color:var(--muted);display:flex;align-items:center;justify-content:center;gap:7px;border-bottom:2px solid transparent;cursor:pointer;min-width:0}
+.tab .n{font:600 11px var(--font-mono);width:20px;height:20px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--line);flex:none}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--chalk)}
+.tab[aria-selected="true"] .n{background:var(--chalk);border-color:var(--chalk);color:var(--on-chalk)}
+@media (max-width:440px){ .tab{flex-direction:column;gap:3px;font-size:12px;padding:7px 2px 6px} }
+
+.sec{padding:16px;border-bottom:1px solid var(--line);display:grid;gap:12px;min-width:0}
+.sec h3{margin:0;font-size:11.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px;justify-content:space-between;min-width:0}
+.sec h3 small{font-weight:500;letter-spacing:0;text-transform:none;font-size:12px;text-align:right}
+.sec h4{margin:0;font-size:13px;font-weight:700}
+.note{margin:0;font-size:12.5px;color:var(--muted);text-wrap:pretty}
+.note b{color:var(--ink)}
+.note.warn{color:var(--tape-ink);background:var(--tape-soft);border:1px solid var(--tape);padding:8px 10px;border-radius:8px}
+.note.bad{color:var(--bad);background:var(--bad-soft);border:1px solid var(--bad);padding:8px 10px;border-radius:8px}
+.note.warn b,.note.bad b{color:inherit}
+.help{background:var(--chalk-soft)}
+.help ol{margin:0;padding-left:20px;display:grid;gap:4px;font-size:13px}
+
+/* поля */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+@media (max-width:420px){ .grid3{grid-template-columns:1fr 1fr} }
+.fld{display:grid;gap:4px;font-size:12px;color:var(--muted);min-width:0}
+.fld > span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.inp{display:flex;align-items:center;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;min-width:0}
+.inp:focus-within{border-color:var(--chalk);box-shadow:0 0 0 3px var(--chalk-soft)}
+.inp input,.inp select{flex:1;min-width:0;width:100%;border:0;background:transparent;padding:8px 9px;font:500 var(--in-size) var(--font-mono);color:var(--ink);outline:none}
+.inp select{font:500 var(--in-size) var(--font-body);padding:8px 6px}
+.inp input.txt{font-family:var(--font-body)}
+.inp i{font-style:normal;color:var(--muted);padding-right:9px;font-size:12px;flex:none}
+.row-btns{display:flex;flex-wrap:wrap;gap:8px}
+.row-btns .btn{flex:1 1 auto}
+.check{display:flex;gap:8px;align-items:center;font-size:13px}
+.check input{width:20px;height:20px;accent-color:var(--chalk);flex:none}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;min-width:0}
+.seg button{flex:1;appearance:none;border:0;border-right:1px solid var(--line);background:var(--panel);padding:8px 4px;font-size:12.5px;font-weight:600;cursor:pointer;min-width:0;color:var(--muted)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--chalk-soft);color:var(--chalk)}
+.seg.mini button{padding:6px 8px;font-size:12px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{appearance:none;border:1px solid var(--line);border-radius:999px;padding:6px 11px;background:var(--panel);font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.chip:hover{background:var(--panel-2)}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--panel);border-color:var(--ink)}
+
+/* комнаты */
+.rooms{display:grid;gap:6px}
+.rcard{appearance:none;width:100%;text-align:left;border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:9px 11px;display:grid;grid-template-columns:1fr auto;gap:2px 10px;cursor:pointer;align-items:center}
+.rcard:hover{border-color:var(--muted)}
+.rcard[aria-pressed="true"]{border-color:var(--chalk);box-shadow:inset 0 0 0 1px var(--chalk);background:var(--chalk-soft)}
+.rcard b{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rcard small{grid-column:1;font:500 12px var(--font-mono);color:var(--muted)}
+.rcard .badge{grid-row:1/3;grid-column:2}
+.badge{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--panel-2);border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.badge.own{background:var(--tape-soft);border-color:var(--tape);color:var(--tape-ink)}
+.badge.err{background:var(--bad-soft);border-color:var(--bad);color:var(--bad)}
+.addroom{display:grid;gap:10px;padding:12px;border-radius:10px;background:var(--panel-2)}
+
+/* стены */
+.walls{display:grid;gap:0}
+.wcard{border:1px solid var(--line);border-radius:10px;padding:10px;display:grid;gap:8px;background:var(--panel)}
+.wcard.sel{border-color:var(--chalk);box-shadow:inset 0 0 0 1px var(--chalk)}
+.wcard.auto{border-style:dashed}
+.wrow{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+.wrow .fld{flex:1 1 110px}
+.wn{font:700 12px var(--font-mono);width:26px;height:26px;border-radius:50%;background:var(--chalk);color:var(--on-chalk);display:grid;place-items:center;flex:none;align-self:center}
+.wcard.auto .wn{background:var(--muted)}
+.whead{display:flex;align-items:center;gap:8px}
+.whead b{font-size:13px;flex:1}
+.hint{font-size:12px;color:var(--muted)}
+.corner{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 0 8px 14px;margin-left:12px;border-left:2px dashed var(--line);font-size:12.5px;color:var(--muted)}
+.corner .inp{width:84px}
+.corner .chip{padding:4px 9px;font-size:12.5px}
+.drow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) auto;gap:8px;align-items:end}
+@media (max-width:420px){ .drow{grid-template-columns:1fr 1fr} }
+dl.kv{margin:0;display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px}
+dl.kv dt{color:var(--muted)}
+dl.kv dd{margin:0;font-family:var(--font-mono);text-align:right;font-variant-numeric:tabular-nums}
+
+/* покрытие */
+.sizes{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:6px}
+.size{appearance:none;border:1px solid var(--line);border-radius:8px;padding:7px 9px;text-align:left;background:var(--panel);cursor:pointer;display:grid;gap:1px;min-width:0}
+.size:hover{border-color:var(--muted)}
+.size b{font:600 14px var(--font-mono);letter-spacing:-.01em}
+.size span{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.size[aria-pressed="true"]{border-color:var(--chalk);background:var(--chalk-soft);box-shadow:inset 0 0 0 1px var(--chalk)}
+.tones{display:flex;flex-wrap:wrap;gap:8px}
+.tone{appearance:none;width:34px;height:34px;border-radius:8px;border:2px solid var(--panel);box-shadow:0 0 0 1px var(--line);cursor:pointer}
+.tone[aria-pressed="true"]{box-shadow:0 0 0 2px var(--chalk)}
+
+/* рисунок */
+.pats{display:grid;grid-template-columns:repeat(auto-fill,minmax(102px,1fr));gap:8px}
+.pat{appearance:none;border:1px solid var(--line);border-radius:10px;padding:5px 5px 7px;background:var(--panel);cursor:pointer;display:grid;gap:4px;text-align:left;min-width:0}
+.pat canvas{width:100%;height:56px;border-radius:6px;display:block;background:var(--panel-2)}
+.pat b{font-size:12px;font-weight:600;padding:0 3px;line-height:1.2}
+.pat span{font-size:11px;color:var(--muted);padding:0 3px;line-height:1.2}
+.pat[aria-pressed="true"]{border-color:var(--chalk);box-shadow:inset 0 0 0 1px var(--chalk);background:var(--chalk-soft)}
+.comp{display:grid;gap:10px;padding:12px;border:1px solid var(--line);border-radius:10px}
+.comp header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.variants{display:grid;gap:6px}
+.var{appearance:none;width:100%;text-align:left;border:1px solid var(--line);background:var(--panel);border-radius:9px;padding:8px 10px;display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:center;cursor:pointer;font-size:12.5px}
+.var:hover{border-color:var(--muted)}
+.var[aria-pressed="true"]{border-color:var(--chalk);background:var(--chalk-soft)}
+.var .vn{font:700 13px var(--font-mono);width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:var(--panel-2)}
+.var small{color:var(--muted)}
+
+/* карточка подрезки */
+.pinfo{position:sticky;top:var(--tabsH,44px);z-index:2;background:var(--panel);border-bottom:1px solid var(--line);box-shadow:0 6px 14px rgba(0,0,0,.06);padding:12px 16px;display:grid;gap:8px;max-height:46vh;overflow:auto}
+.pinfo header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.pinfo header b{font-size:14px}
+.pinfo canvas{width:100%;height:112px;display:block;border-radius:8px;background:var(--panel-2)}
+.pinfo ul{margin:0;padding-left:18px;display:grid;gap:3px;font-size:13px}
+.pinfo .meta{font-size:12px;color:var(--muted)}
+.tag{display:inline-block;font:600 11px var(--font-mono);padding:1px 6px;border-radius:5px;background:var(--panel-2);border:1px solid var(--line);color:var(--muted);vertical-align:1px}
+
+/* плашки и итоги */
+.pill{background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:3px 10px;font:500 12px var(--font-mono);font-variant-numeric:tabular-nums;white-space:nowrap;flex:none}
+.pill.warn{background:var(--tape-soft);border-color:var(--tape);color:var(--tape-ink)}
+.pill.bad{background:var(--bad-soft);border-color:var(--bad);color:var(--bad)}
+.pill.ok{background:var(--good-soft);border-color:var(--good);color:var(--good)}
+.pill.info{background:var(--chalk-soft);border-color:var(--chalk);color:var(--chalk);font-family:var(--font-body);font-weight:600}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tile{background:var(--panel-2);border-radius:10px;padding:10px 12px;display:grid;gap:2px;min-width:0}
+.tile b{font:600 19px var(--font-mono);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.tile span{font-size:12px;color:var(--muted)}
+ol.steps{margin:0;padding:0;list-style:none;counter-reset:st;display:grid;gap:10px}
+ol.steps li{counter-increment:st;display:grid;grid-template-columns:24px 1fr;gap:10px;font-size:13.5px;text-wrap:pretty}
+ol.steps li::before{content:counter(st);font:700 12px var(--font-mono);width:22px;height:22px;border-radius:50%;border:1.5px solid var(--chalk);color:var(--chalk);display:grid;place-items:center}
+.tblwrap{overflow-x:auto;margin:0 -4px}
+table.tbl{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums}
+.tbl th{text-align:left;font-weight:600;color:var(--muted);font-size:11.5px;padding:6px 4px;border-bottom:1px solid var(--line);white-space:nowrap}
+.tbl td{padding:7px 4px;border-bottom:1px solid var(--line);vertical-align:top}
+.tbl td.n{font-family:var(--font-mono);white-space:nowrap}
+.tbl tr.bad td{color:var(--bad)}
+.rows{display:grid;gap:6px}
+.rowl{display:grid;grid-template-columns:62px 1fr;gap:8px;align-items:start;font-size:12px;padding:6px 0;border-bottom:1px dashed var(--line)}
+.rowl .rh{font-weight:600}
+.rowl .rh small{display:block;font:500 11px var(--font-mono);color:var(--muted)}
+.rowl .rh small.cutw{color:var(--tape-ink)}
+.pcs{display:flex;flex-wrap:wrap;gap:4px}
+.pc{font:500 12px var(--font-mono);padding:2px 6px;border-radius:5px;background:var(--panel-2);border:1px solid var(--line);white-space:nowrap}
+.pc.cut{background:var(--tape-soft);border-color:var(--tape);color:var(--tape-ink)}
+.pc.bad{background:var(--bad-soft);border-color:var(--bad);color:var(--bad)}
+.pc sup{font-size:9px;margin-left:2px;color:var(--muted)}
+.groups{display:grid;gap:6px}
+.grp{appearance:none;width:100%;text-align:left;border:1px solid var(--line);background:var(--panel);border-radius:9px;padding:8px 10px;display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:center;cursor:pointer}
+.grp:hover{border-color:var(--muted)}
+.grp[aria-pressed="true"]{border-color:var(--chalk);background:var(--chalk-soft)}
+.grp .cnt{font:700 15px var(--font-mono);min-width:44px;text-align:center;padding:4px 6px;border-radius:7px;background:var(--tape-soft);color:var(--tape-ink)}
+.grp .tx{font-size:12.5px;display:grid;gap:1px;min-width:0}
+.grp .tx small{color:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:10px;border-radius:2px;display:inline-block;border:1px solid var(--line)}
+
+/* окно */
+.modal{position:fixed;inset:0;background:rgba(8,12,16,.5);display:grid;place-items:center;padding:16px;z-index:50}
+.modal .box{background:var(--panel);border-radius:14px;width:min(560px,100%);max-height:86%;overflow:auto;padding:16px;box-sizing:border-box;display:grid;gap:12px;box-shadow:var(--shadow)}
+.modal .box header{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.modal .box h2{margin:0;font:700 16px var(--font-display);letter-spacing:.01em}
+.plist{display:grid;gap:6px}
+.pitem{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:9px 10px}
+.pitem b{font-size:14px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pitem small{color:var(--muted);font-size:12px}
+.pitem .acts{display:flex;gap:6px}
+textarea.code{width:100%;min-height:160px;box-sizing:border-box;font:12px/1.4 var(--font-mono);background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:8px}
+.modal img{max-width:100%;border-radius:8px;border:1px solid var(--line)}
+@media (prefers-reduced-motion:no-preference){ .msg{transition:color .2s} }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand" aria-label="Раскладка">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#1d6bd6"/><g fill="#fff"><path d="M7 15l6-6 3 3-6 6z"/><path d="M16 12l3-3 6 6-3 3z" opacity=".75"/><path d="M7 24l6-6 3 3-6 6z" opacity=".75"/><path d="M16 21l3-3 6 6-3 3z"/></g></svg>
+      <b>Раскладка</b>
+    </div>
+    <div class="proj"><input id="projName" aria-label="Название проекта" maxlength="80"></div>
+    <div class="top-actions">
+      <button class="btn" id="btnProjects" type="button" aria-label="Проекты"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h6l2 2h10v10H3z"/></svg><span class="t-long">Проекты</span></button>
+      <button class="btn primary" id="btnSave" type="button" aria-label="Сохранить"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3h11l3 3v15H5z"/><path d="M8 3v6h8"/></svg><span class="t-long">Сохранить</span></button>
+    </div>
+  </header>
+
+  <main class="work" id="work">
+    <section class="mapcol" id="mapcol" aria-label="План пола">
+      <div class="mapbar" role="toolbar" aria-label="Карта">
+        <div class="modes" role="group" aria-label="Что делаем на карте">
+          <button class="tbtn" data-mode="view" type="button" title="Смотреть: двигать и масштабировать, нажать на доску — показать подрезку"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11V5a1.5 1.5 0 013 0v5m0-1V4a1.5 1.5 0 013 0v6m0-3a1.5 1.5 0 013 0v7a6 6 0 01-6 6h-1a6 6 0 01-5-2.7L4 15a1.6 1.6 0 012.6-1.8L9 15"/></svg><span class="lbl">Обзор</span></button>
+          <button class="tbtn" data-mode="pattern" type="button" title="Двигать рисунок пальцем или стрелками внизу"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></svg><span class="lbl">Рисунок</span></button>
+          <button class="tbtn" data-mode="walls" type="button" title="Двигать углы и выгибать стены выбранной комнаты"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V4h10"/><path d="M14 4c4 2 6 6 6 16H4"/><circle cx="14" cy="4" r="2" fill="currentColor"/></svg><span class="lbl">Стены</span></button>
+          <button class="tbtn" data-mode="rooms" type="button" title="Двигать комнаты по плану этажа"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/><path d="M11 7h4v6"/></svg><span class="lbl">Комнаты</span></button>
+        </div>
+        <div class="mapbar-r" role="group" aria-label="Вид">
+          <button class="tbtn" id="btnFit" type="button" title="Вписать план в экран"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><span class="t-opt">Вписать</span></button>
+          <button class="tbtn" id="btnLabels" type="button" title="Размеры подрезок на карте"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 9v6M21 9v6"/></svg><span class="t-opt">Размеры</span></button>
+          <button class="tbtn" id="btnStyle" type="button" title="Схема: подрезки и типы планок яркими цветами"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="7" height="7"/><rect x="13" y="13" width="7" height="7" fill="currentColor"/><rect x="13" y="4" width="7" height="7"/><rect x="4" y="13" width="7" height="7"/></svg><span class="t-opt">Схема</span></button>
+          <button class="tbtn" id="btnImage" type="button" title="Сохранить план картинкой"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-8 8"/></svg><span class="t-opt">Картинка</span></button>
+        </div>
+      </div>
+      <div class="stage" id="stage"><canvas id="plan" aria-label="Карта раскладки"></canvas></div>
+      <div class="mapfoot">
+        <div class="nudge" id="nudge" hidden>
+          <span class="nudge-t">Двигаю: <b id="nudgeTarget">общий рисунок</b></span>
+          <div class="pad" role="group" aria-label="Сдвиг рисунка">
+            <button type="button" data-nudge="-1,0" aria-label="Влево"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 5l-7 7 7 7"/></svg></button>
+            <button type="button" data-nudge="0,-1" aria-label="Вверх"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 15l7-7 7 7"/></svg></button>
+            <button type="button" data-nudge="0,1" aria-label="Вниз"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 9l7 7 7-7"/></svg></button>
+            <button type="button" data-nudge="1,0" aria-label="Вправо"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 5l7 7-7 7"/></svg></button>
+          </div>
+          <button class="btn small" type="button" id="stepBtn" data-step-cycle title="Шаг сдвига стрелками">шаг 10 мм</button>
+        </div>
+        <div class="pills" id="status"></div>
+        <div class="msg" id="msg" role="status" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <div class="splitter" id="splitter" role="separator" aria-orientation="horizontal" aria-label="Потяните, чтобы изменить размер карты" tabindex="0"><span></span></div>
+
+    <section class="panel" id="panel">
+      <nav class="tabs" id="tabs" role="tablist" aria-label="Шаги">
+        <button class="tab" role="tab" data-tab="plan" aria-selected="true" type="button"><span class="n">1</span>План</button>
+        <button class="tab" role="tab" data-tab="mat" aria-selected="false" type="button"><span class="n">2</span>Покрытие</button>
+        <button class="tab" role="tab" data-tab="pat" aria-selected="false" type="button"><span class="n">3</span>Рисунок</button>
+        <button class="tab" role="tab" data-tab="res" aria-selected="false" type="button"><span class="n">4</span>Расчёт</button>
+      </nav>
+      <div class="pinfo" id="pieceInfo" hidden></div>
+
+      <!-- 1. План -->
+      <div class="tabbody" data-body="plan">
+        <div class="sec help" id="helpBox">
+          <h3>Как пользоваться<button class="icon" type="button" data-act="help-close" aria-label="Скрыть подсказку"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg></button></h3>
+          <ol>
+            <li>Начертите комнаты по стенам. Несколько комнат поставьте рядом — получится этаж, рисунок пойдёт через проёмы.</li>
+            <li>Выберите покрытие и размер планки.</li>
+            <li>Выберите рисунок и подвиньте его на карте, пока подрезки у стен не станут удобными.</li>
+            <li>Во вкладке «Расчёт» — с чего начать, какие подрезки пилить и сколько покупать.</li>
+          </ol>
+        </div>
+        <div class="sec">
+          <h3>Комнаты этажа <small id="floorSum"></small></h3>
+          <div class="rooms" id="roomList"></div>
+          <button class="btn" type="button" data-act="room-add-open" id="btnAddRoom"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Добавить комнату</button>
+          <div class="addroom" id="addRoomBox" hidden>
+            <div class="grid2">
+              <label class="fld"><span>Длина</span><span class="inp"><input id="newL" inputmode="decimal" value="4200"><i>мм</i></span></label>
+              <label class="fld"><span>Ширина</span><span class="inp"><input id="newW" inputmode="decimal" value="3600"><i>мм</i></span></label>
+            </div>
+            <button class="btn primary" type="button" data-act="room-add-rect">Добавить прямоугольную</button>
+            <div class="chips" id="tplNew"></div>
+            <p class="note">Новая комната встанет справа от остальных. Подвиньте её на карте в режиме «Комнаты» — она прилипнет к соседней стене.</p>
+          </div>
+          <label class="fld"><span>Толщина стен между комнатами</span><span class="inp"><input id="wallT" data-k="set.wallT" data-num inputmode="decimal"><i>мм</i></span></label>
+        </div>
+        <div id="roomEditor"></div>
+      </div>
+
+      <!-- 2. Покрытие -->
+      <div class="tabbody" data-body="mat" hidden>
+        <div class="sec">
+          <h3>Для чего выбираем покрытие</h3>
+          <div class="chips" id="matTargets"></div>
+          <label class="check" id="matUseMainFld"><input type="checkbox" id="matUseMain"> Такое же, как основное покрытие</label>
+          <p class="note" id="matTargetNote"></p>
+        </div>
+        <div id="matEditor">
+          <div class="sec">
+            <h3>Вид покрытия</h3>
+            <div class="chips" id="catChips"></div>
+          </div>
+          <div class="sec">
+            <h3 id="sizesTitle">Размеры</h3>
+            <div class="sizes" id="sizeList"></div>
+            <p class="note" id="sizesNote"></p>
+          </div>
+          <div class="sec">
+            <h3>Планка <small>можно вписать свой размер</small></h3>
+            <div class="grid3">
+              <label class="fld"><span>Длина L</span><span class="inp"><input id="matL" data-mk="L" data-num inputmode="decimal"><i>мм</i></span></label>
+              <label class="fld"><span>Ширина W</span><span class="inp"><input id="matW" data-mk="W" data-num inputmode="decimal"><i>мм</i></span></label>
+              <label class="fld"><span>Толщина</span><span class="inp"><input id="matT" data-mk="T" data-num inputmode="decimal"><i>мм</i></span></label>
+            </div>
+            <div class="grid2">
+              <label class="fld"><span>Форма</span><span class="inp"><select id="matShape" data-mk="shape"><option value="plank">Прямоугольная</option><option value="chevron">Французская (скос)</option><option value="tile">Плитка / модуль</option></select></span></label>
+              <label class="fld"><span>Шов между элементами</span><span class="inp"><input id="matJoint" data-mk="joint" data-num inputmode="decimal"><i>мм</i></span></label>
+            </div>
+            <div class="grid2">
+              <label class="fld"><span>Название своего размера</span><span class="inp"><input class="txt" id="customName" placeholder="Дуб 1500×150"></span></label>
+              <div class="fld"><span>&nbsp;</span><button class="btn" type="button" data-act="save-custom">В «Свои размеры»</button></div>
+            </div>
+          </div>
+          <div class="sec">
+            <h3>Цвет на плане</h3>
+            <div class="tones" id="tones"></div>
+          </div>
+        </div>
+        <div class="sec">
+          <h3>Монтаж</h3>
+          <div class="grid2">
+            <label class="fld"><span>Зазор у стен</span><span class="inp"><input id="setGap" data-k="set.gap" data-num inputmode="decimal"><i>мм</i></span></label>
+            <label class="fld"><span>Пропил пилы</span><span class="inp"><input id="setKerf" data-k="set.kerf" data-num inputmode="decimal"><i>мм</i></span></label>
+          </div>
+          <p class="note">Зазор — отступ от стен под плинтус. Ламинат и доска 8–10 мм, кварцвинил 3–5 мм, клеевой винил 0–2 мм.</p>
+        </div>
+        <div class="sec">
+          <h3>Упаковка основного покрытия</h3>
+          <div class="grid3">
+            <label class="fld"><span>Шт в пачке</span><span class="inp"><input id="setPerPack" data-k="set.perPack" data-num inputmode="decimal"><i>шт</i></span></label>
+            <label class="fld"><span>или м² в пачке</span><span class="inp"><input id="setPackM2" data-k="set.packM2" data-num inputmode="decimal"><i>м²</i></span></label>
+            <label class="fld"><span>Запас на брак</span><span class="inp"><input id="setReserve" data-k="set.reserve" data-num inputmode="decimal"><i>%</i></span></label>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. Рисунок -->
+      <div class="tabbody" data-body="pat" hidden>
+        <div class="sec">
+          <h3>Что настраиваем</h3>
+          <div class="chips" id="patTargets"></div>
+          <p class="note" id="patTargetNote"></p>
+        </div>
+        <div class="sec" id="compSec">
+          <h3>Составной рисунок <small id="compRoom"></small></h3>
+          <div id="compBox"></div>
+        </div>
+        <div class="sec">
+          <h3>Рисунок укладки</h3>
+          <div class="pats" id="patList"></div>
+          <p class="note" id="patNote" hidden></p>
+        </div>
+        <div class="sec" id="dirSec">
+          <h3 id="dirTitle">Направление</h3>
+          <div class="grid2" id="refFlds">
+            <label class="fld" id="refRoomFld"><span>Опорная комната</span><span class="inp"><select id="refRoom" data-pk="refRoom"></select></span></label>
+            <label class="fld"><span>Опорная стена</span><span class="inp"><select id="refWall" data-pk="refWall" data-num></select></span></label>
+          </div>
+          <div class="seg" id="dirSeg" role="group" aria-label="Направление">
+            <button data-act="dir" data-v="along" type="button">Вдоль</button>
+            <button data-act="dir" data-v="across" type="button">Поперёк</button>
+            <button data-act="dir" data-v="diag" type="button">45°</button>
+            <button data-act="dir" data-v="custom" type="button">Свой угол</button>
+          </div>
+          <label class="fld" id="customAngleFld" hidden><span>Угол к опорной стене</span><span class="inp"><input id="patAngle" data-pk="angle" data-num inputmode="decimal"><i>°</i></span></label>
+          <label class="fld" id="chevFld" hidden><span>Угол французской ёлки (скос торца)</span><span class="inp"><select id="chevAngle" data-pk="chevAngle" data-num><option value="30">30°</option><option value="45">45°</option><option value="60">60°</option></select></span></label>
+          <p class="note" id="dirNote"></p>
+        </div>
+        <div class="sec" id="posSec">
+          <h3>Положение рисунка</h3>
+          <p class="note">Подвиньте рисунок, чтобы к стенам не приходили узкие полоски: на карте в режиме «Рисунок» тяните пальцем или жмите стрелки под картой. Кнопка «Подобрать» покажет лучшие варианты.</p>
+          <div class="grid2">
+            <label class="fld" id="offBFld"><span id="offBLabel">Сдвиг от опорной стены</span><span class="inp"><input id="offB" data-pk="offB" data-num inputmode="decimal"><i>мм</i></span></label>
+            <label class="fld"><span id="offALabel">Сдвиг вдоль стены</span><span class="inp"><input id="offA" data-pk="offA" data-num inputmode="decimal"><i>мм</i></span></label>
+          </div>
+          <div class="row-btns">
+            <button class="btn primary" type="button" data-act="optimize" id="btnOptimize">Подобрать варианты</button>
+            <button class="btn" type="button" data-act="center" id="btnCenter">По центру</button>
+            <button class="btn" type="button" data-act="corner0" id="btnCorner">От угла</button>
+          </div>
+          <label class="check" id="keepCenterFld"><input type="checkbox" id="keepCenter" data-pk="keepCenter"> Только симметричные варианты (подрезки у противоположных стен одинаковые)</label>
+          <div class="variants" id="variants"></div>
+          <div class="row-btns" id="flipBtns">
+            <button class="btn small" type="button" data-act="flipV" id="btnFlipV">Первый ряд — у другой стены</button>
+            <button class="btn small" type="button" data-act="flipU" id="btnFlipU">Ряд начинать с другого конца</button>
+          </div>
+        </div>
+        <div class="sec">
+          <h3>Правила</h3>
+          <div class="grid3">
+            <label class="fld" data-show="bond"><span>Кусок не короче</span><span class="inp"><input id="minPiece" data-pk="minPiece" data-num inputmode="decimal"><i>мм</i></span></label>
+            <label class="fld" data-show="bond"><span>Разбег стыков</span><span class="inp"><input id="minStag" data-pk="minStag" data-num inputmode="decimal"><i>мм</i></span></label>
+            <label class="fld"><span>Узкая подрезка, если меньше</span><span class="inp"><input id="minEdge" data-pk="minEdge" data-num inputmode="decimal"><i>мм</i></span></label>
+          </div>
+          <button class="btn small" type="button" data-act="shuffle" data-show="random">Перемешать разбег</button>
+        </div>
+      </div>
+
+      <!-- 4. Расчёт -->
+      <div class="tabbody" data-body="res" hidden><div id="results"></div></div>
+    </section>
+  </main>
+</div>
+<div class="modal" id="modal" hidden><div class="box" id="modalBox" role="dialog" aria-modal="true" aria-label="Окно"></div></div>
+<script src="js/engine.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
