@@ -24,6 +24,7 @@ jobs:
           node-version: 20
       - name: Синтаксис скриптов
         run: |
+          node --check js/platform.js
           node --check js/engine.js
           node --check js/app.js
           node --check sw.js

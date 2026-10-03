@@ -5,10 +5,32 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Раскладка пола</title>
 <meta name="description" content="Карта раскладки пола для укладчика: этаж из комнат, ёлочка, французская ёлочка, палуба, квадраты, рамка и вставки, подрезки у стен и расход.">
-<meta name="theme-color" content="#1d6bd6" data-site>
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" data-site>
+<meta name="theme-color" content="#182029" media="(prefers-color-scheme: dark)" data-site>
+<meta name="apple-mobile-web-app-capable" content="yes" data-site>
+<meta name="mobile-web-app-capable" content="yes" data-site>
+<meta name="apple-mobile-web-app-title" content="Раскладка" data-site>
+<meta name="apple-mobile-web-app-status-bar-style" content="default" data-site>
+<meta name="application-name" content="Раскладка" data-site>
+<meta name="format-detection" content="telephone=no" data-site>
 <link rel="manifest" href="manifest.webmanifest" data-site>
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml" data-site>
-<link rel="apple-touch-icon" href="icons/icon-192.png" data-site>
+<link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" data-site>
+<link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png" data-site>
+<link rel="apple-touch-startup-image" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="icons/splash-1290x2796.png" data-site>
+<link rel="apple-touch-startup-image" media="(device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="icons/splash-1320x2868.png" data-site>
+<link rel="apple-touch-startup-image" media="(device-width: 402px) and (device-height: 874px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="icons/splash-1206x2622.png" data-site>
+<link rel="apple-touch-startup-image" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="icons/splash-1179x2556.png" data-site>
+<link rel="apple-touch-startup-image" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="icons/splash-1170x2532.png" data-site>
+<link rel="apple-touch-startup-image" media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="icons/splash-1284x2778.png" data-site>
+<link rel="apple-touch-startup-image" media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="icons/splash-1125x2436.png" data-site>
+<link rel="apple-touch-startup-image" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="icons/splash-1242x2688.png" data-site>
+<link rel="apple-touch-startup-image" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" href="icons/splash-828x1792.png" data-site>
+<link rel="apple-touch-startup-image" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" href="icons/splash-750x1334.png" data-site>
+<link rel="apple-touch-startup-image" media="(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" href="icons/splash-2048x2732.png" data-site>
+<link rel="apple-touch-startup-image" media="(device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" href="icons/splash-1668x2388.png" data-site>
+<link rel="apple-touch-startup-image" media="(device-width: 820px) and (device-height: 1180px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" href="icons/splash-1640x2360.png" data-site>
+<link rel="apple-touch-startup-image" media="(device-width: 768px) and (device-height: 1024px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" href="icons/splash-1536x2048.png" data-site>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Unbounded:wght@600;700&display=swap">
@@ -62,7 +84,14 @@
 }
 html,body{height:100%}
 body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.45 var(--font-body);-webkit-font-smoothing:antialiased;overflow:hidden}
-.site body{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+.site body{box-sizing:border-box;padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)}
+html,body{overscroll-behavior:none}
+button,.chip,.tab,.tbtn{-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+#plan{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.tg .brand{display:none}
+.install{background:var(--tape-soft)}
+.install p{margin:0;font-size:13px;text-wrap:pretty}
+.install svg.share{width:16px;height:16px;vertical-align:-3px;color:var(--chalk)}
 [hidden]{display:none!important}
 button,input,select,textarea{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--chalk);outline-offset:2px}
@@ -382,6 +411,7 @@ textarea.code{width:100%;min-height:160px;box-sizing:border-box;font:12px/1.4 va
 
       <!-- 1. План -->
       <div class="tabbody" data-body="plan">
+        <div class="sec install" id="installBox" hidden></div>
         <div class="sec help" id="helpBox">
           <h3>Как пользоваться<button class="icon" type="button" data-act="help-close" aria-label="Скрыть подсказку"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg></button></h3>
           <ol>
@@ -534,6 +564,7 @@ textarea.code{width:100%;min-height:160px;box-sizing:border-box;font:12px/1.4 va
   </main>
 </div>
 <div class="modal" id="modal" hidden><div class="box" id="modalBox" role="dialog" aria-modal="true" aria-label="Окно"></div></div>
+<script src="js/platform.js"></script>
 <script src="js/engine.js"></script>
 <script src="js/app.js"></script>
 </body>

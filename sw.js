@@ -1,7 +1,7 @@
 /* Офлайн-режим: приложение открывается без интернета на объекте.
-   Свои файлы — сначала из сети (всегда свежая версия), без сети — из кеша. Шрифты — из кеша. */
-const CACHE = 'raskladka-v2';
-const SHELL = ['./', 'index.html', 'js/engine.js', 'js/app.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'];
+   Свои файлы — сначала из сети (всегда свежая версия), без сети — из кеша. Шрифты и библиотека Telegram — из кеша. */
+const CACHE = 'raskladka-v3';
+const SHELL = ['./', 'index.html', 'js/platform.js', 'js/engine.js', 'js/app.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -20,7 +20,7 @@ self.addEventListener('fetch', e => {
     }).catch(() => caches.match(req, { ignoreSearch: true }).then(r => r || caches.match('index.html'))));
     return;
   }
-  if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com') {
+  if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com' || url.hostname === 'telegram.org') {
     e.respondWith(caches.match(req).then(hit => hit || fetch(req).then(res => {
       const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); return res;
     })));

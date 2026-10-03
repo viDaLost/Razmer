@@ -2,6 +2,7 @@
 (() => {
 'use strict';
 const E = window.RazmerEngine;
+const PF = window.RazmerPlatform || { inTG: false, tg: null, ios: false, android: false, standalone: false, ready: Promise.resolve(null), haptic() {}, version() { return false; } };
 const { DEG, clamp, mod, num, mm, f1, fm2, dist, plural, hash01, area, perim, inPoly, segDist, bboxOf, centroid, centroidMany, onLine,
   CATS, catById, TONES, PATTERNS, patDef, BORDER_PATTERNS, TEMPLATES, rectWalls, defaultPat, newRoom, newId, defaultState, migrateState,
   roomGeom, wallsFromCorners, innerAngles, unitV, inwardOf, arcRadius, arcLength, sagittaFromRadius, computeGeo, unitKeys, buildUnit, computeUnit,
@@ -501,7 +502,7 @@ function selectedPiece() {
 }
 function renderPieceInfo() {
   const el = $('#pieceInfo'), sp = selectedPiece();
-  if (!sp) { el.hidden = true; return; }
+  if (!sp) { el.hidden = true; syncTgBack(); return; }
   const { res, p } = sp, u = res.unit, spec = p.spec || cutSpec(p), grp = p.gk ? res.groups.find(g => g.key === p.gk) : null;
   const kindName = p.kind === 'A' ? (patDef(u.P.type).group === 'basket' ? 'вдоль' : 'тип A (левая)') : p.kind === 'B' ? (patDef(u.P.type).group === 'basket' ? 'поперёк' : 'тип B (правая)') : '';
   let rowInfo = ''; if (res.rows) { const ri = res.rows.findIndex(x => x.k === p.row); if (ri >= 0) rowInfo = 'ряд ' + (ri + 1) + ' из ' + res.rows.length; }
@@ -512,7 +513,7 @@ function renderPieceInfo() {
     '<div class="meta">' + [esc(u.name), rowInfo, src, (!p.full ? 'самое узкое место ≈ ' + mm(p.thick) + ' мм' : ''), grp && grp.idx.length > 1 ? 'таких же: ' + grp.idx.length + ' шт' : ''].filter(Boolean).join(' · ') + '</div>' +
     (grp && grp.idx.length > 1 ? '<button class="btn small" type="button" data-act="piece-hl">' + (UI.hl && UI.hl.gk === p.gk ? 'Снять подсветку' : 'Показать все такие на плане') + '</button>' : '');
   el.hidden = false;
-  drawPlank($('#pieceCv'), p, u.mat);
+  drawPlank($('#pieceCv'), p, u.mat); syncTgBack();
 }
 function drawPlank(c, p, M) {
   const dpr = window.devicePixelRatio || 1, w = c.clientWidth || 300, h = c.clientHeight || 112; c.width = w * dpr; c.height = h * dpr;
@@ -661,6 +662,7 @@ cv.addEventListener('pointermove', e => {
   } else if (gest.type === 'prot' && gest.c) {
     const w = s2w(p.x, p.y), c = gest.c, d = [w[0] - c.C[0], w[1] - c.C[1]];
     const th = snapAngle(Math.atan2(d[0] * c.e2[0] + d[1] * c.e2[1], d[0] * c.e1[0] + d[1] * c.e1[1]) / DEG);
+    if (th % 15 === 0 && th !== gest.lastSnap) PF.haptic('select'); gest.lastSnap = th;
     setDirection(gest.P, th, c); syncPatInputs(); syncPatternUI(); clearVariants();
     say('Угол к опорной стене: ' + f1(shownAngle(gest.P)) + '°. У 0°, 45° и 90° стрелка прилипает.', null, true); invalidate();
   } else if (gest.type === 'corner') {
@@ -691,6 +693,7 @@ cv.addEventListener('pointermove', e => {
     const na = snapAngle(gest.a0 + (phi - gest.phi0) / DEG), delta = na - gest.a0;
     const r = room(gest.rid), q = rot2([gest.x0, gest.y0], gest.C, delta * DEG);
     r.x0 = Math.round(q[0]); r.y0 = Math.round(q[1]); r.a0 = mod(na, 360);
+    if (na % 15 === 0 && na !== gest.lastSnap) PF.haptic('select'); gest.lastSnap = na;
     say('Поворот: стена 1 под ' + mm(mod(na, 360)) + '° к горизонтали. У 0°, 45° и 90° комната прилипает.', null, true); invalidate();
   } else if (gest.type === 'add') {
     const w1 = snapPoint(s2w(p.x, p.y), null); UI.addPrev = [gest.w0, w1];
@@ -704,6 +707,7 @@ function placeRoomAt(tplId, w) {
   finishAdd(r);
 }
 function finishAdd(r) {
+  PF.haptic('medium');
   S.rooms.push(r); UI.room = r.id; UI.addTpl = null; UI.addPrev = null;
   afterRooms('Комната «' + r.name + '» добавлена. Тяните её пальцем, круглая ручка сверху — поворот. Проём в соседнюю комнату — на шаге 1.');
   renderCtxbar();
@@ -789,7 +793,7 @@ function renderCtxbar() {
         '<button class="btn small" type="button" data-act="flipU" title="Развернуть рисунок в обратную сторону">⇄ Развернуть</button>';
     }
   }
-  el.innerHTML = h; el.hidden = !h;
+  el.innerHTML = h; el.hidden = !h; syncTgBack();
 }
 
 /* ================= панель: вкладки и поля ================= */
@@ -798,7 +802,7 @@ function setTab(t) {
   $$('.tab').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === t)));
   $$('.tabbody').forEach(b => { b.hidden = b.dataset.body !== t; });
   if (t === 'plan') renderPlanTab(); if (t === 'mat') renderMatTab(); if (t === 'pat') renderPatTab(); if (t === 'res') renderResults();
-  $('#panel').scrollTop = 0; saveUI();
+  $('#panel').scrollTop = 0; saveUI(); syncTgBack();
 }
 $$('.tab').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
 function getK(path) { return path.split('.').reduce((o, k) => o == null ? o : o[k], S); }
@@ -981,6 +985,8 @@ const ACT = {
   'res-target': b => { UI.target = b.dataset.key; renderResults(); renderStatus(); draw(); },
   'grp': b => { const key = b.dataset.key, gk = b.dataset.gk; UI.hl = UI.hl && UI.hl.gk === gk && UI.hl.key === key ? null : { key, gk }; $$('.grp').forEach(x => x.setAttribute('aria-pressed', String(!!UI.hl && x.dataset.gk === UI.hl.gk && x.dataset.key === UI.hl.key))); draw(); },
   'export-img': () => exportImage(), 'export-copy': () => copyReport(), 'export-file': () => exportProject(),
+  'install': () => { if (!deferredPrompt) return; deferredPrompt.prompt(); deferredPrompt.userChoice.then(c => { if (c && c.outcome === 'accepted') { UI.installOff = true; saveUI(); } deferredPrompt = null; renderInstall(); }).catch(() => {}); },
+  'install-off': () => { UI.installOff = true; saveUI(); renderInstall(); },
   'piece-close': () => { UI.sel = null; UI.hl = null; renderPieceInfo(); draw(); },
   'piece-hl': () => { const sp = selectedPiece(); if (!sp) return; UI.hl = UI.hl && UI.hl.gk === sp.p.gk ? null : { key: sp.res.unit.key, gk: sp.p.gk }; renderPieceInfo(); draw(); },
 };
@@ -1326,7 +1332,7 @@ function renderResults() {
       (res.groups.length > list.length ? '<p class="note">Ещё ' + (res.groups.length - list.length) + ' разных подрезок — смотрите на карте.</p>' : '') + '<p class="note">Нажмите на строку — такие куски подсветятся на плане.</p></div>';
   }
   h += '<div class="sec"><h3>Обозначения</h3><div class="legend"><span><i style="background:' + rgb((TONES[res.unit.mat.tone] || TONES.oak).c) + '"></i>целая</span><span><i style="background:' + COL.tape + '"></i>подрезка</span><span><i style="background:' + COL.badSoft + ';border-color:' + COL.bad + '"></i>узкая подрезка</span><span><i style="background:' + COL.chalk + ';height:3px"></i>линия разметки</span><span><i style="background:' + COL.gap + '"></i>зазор у стен</span></div></div>';
-  h += '<div class="sec"><h3>Сохранить и отправить</h3><div class="row-btns"><button class="btn" type="button" data-act="export-img">Картинка плана</button><button class="btn" type="button" data-act="export-copy">Скопировать расчёт</button><button class="btn" type="button" data-act="export-file">Файл проекта</button></div></div>';
+  h += '<div class="sec"><h3>Сохранить и отправить</h3><div class="row-btns"><button class="btn" type="button" data-act="export-img">Картинка плана</button><button class="btn" type="button" data-act="export-copy">Скопировать расчёт</button><button class="btn" type="button" data-act="export-file">Файл проекта</button><a class="btn" id="tgShare" href="' + esc(tgShareLink()) + '" target="_blank" rel="noopener">Отправить в Telegram</a></div></div>';
   el.innerHTML = h;
 }
 function reportText() {
@@ -1356,7 +1362,7 @@ async function saveFile(name, data, mime) {
   const dl = await capUse('downloads');
   if (dl) { try { await dl.save({ filename: name, data }); return 'saved'; } catch (e) { if (e && e.code === 'declined') return 'declined'; } }
   let top = false; try { top = window.top === window.self; } catch (e) { top = false; }
-  if (top && !window.claude) {
+  if (top && !window.claude && !PF.inTG) {
     try { const blob = data instanceof Blob ? data : new Blob([data], { type: mime }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000); return 'saved'; } catch (e) { /* ниже — окно */ }
   }
   return 'fallback';
@@ -1386,19 +1392,50 @@ async function exportProject() {
 }
 
 /* ================= хранилище проектов ================= */
+/* облако Telegram: значения до 4096 символов, поэтому проект режем на куски */
+const TgStore = {
+  cs: null, list: [], CH: 3800,
+  call(fn, ...args) { return new Promise((res, rej) => { try { this.cs[fn](...args, (err, val) => err ? rej(err) : res(val)); } catch (e) { rej(e); } }); },
+  keys(item, from, to) { const out = []; for (let i = from; i < to; i++) out.push(item.id + '_' + i); return out; },
+  async init(tg) {
+    if (!tg || !tg.CloudStorage || !PF.version('6.9')) return false; this.cs = tg.CloudStorage;
+    try { const v = await this.call('getItem', 'idx'); this.list = v ? JSON.parse(v) : []; } catch (e) { this.list = []; }
+    return true;
+  },
+  async saveIndex() {
+    this.list.sort((a, b) => b.updated - a.updated);
+    while (JSON.stringify(this.list).length > 4000 && this.list.length > 1) { const old = this.list.pop(); try { await this.call('removeItems', this.keys(old, 0, old.n)); } catch (e) { /* пропускаем */ } }
+    await this.call('setItem', 'idx', JSON.stringify(this.list));
+  },
+  async save(p) {
+    const data = JSON.stringify(p.data), n = Math.max(1, Math.ceil(data.length / this.CH)); if (n > 200) throw new Error('too big');
+    const old = this.list.find(x => x.id === p.id);
+    for (let i = 0; i < n; i++) await this.call('setItem', p.id + '_' + i, data.slice(i * this.CH, (i + 1) * this.CH));
+    if (old && old.n > n) { try { await this.call('removeItems', this.keys(old, n, old.n)); } catch (e) { /* пропускаем */ } }
+    this.list = this.list.filter(x => x.id !== p.id); this.list.push({ id: p.id, name: String(p.name).slice(0, 60), updated: p.updated, n });
+    await this.saveIndex();
+  },
+  async load(item) { const ks = this.keys(item, 0, item.n), vals = await this.call('getItems', ks); return JSON.parse(ks.map(k => vals[k] || '').join('')); },
+  async remove(item) { try { await this.call('removeItems', this.keys(item, 0, item.n)); } catch (e) { /* пропускаем */ } this.list = this.list.filter(x => x.id !== item.id); await this.saveIndex(); },
+  async saveMats(list) { const v = JSON.stringify(list); if (v.length <= 4000) await this.call('setItem', 'mats', v); },
+  async loadMats() { try { const v = await this.call('getItem', 'mats'); return v ? JSON.parse(v) : []; } catch (e) { return []; } },
+};
 const Store = {
-  db: null, uid: null, cloud: [], mats: [],
+  db: null, uid: null, cloud: [], mats: [], tg: false,
   localList() { try { return JSON.parse(lsGet(KEY_PROJ) || '[]') || []; } catch (e) { return []; } },
   setLocal(list) { return lsSet(KEY_PROJ, JSON.stringify(list)); },
   col() { return this.db.collection('data/users/' + this.uid); },
-  list() { return [...this.cloud.map(p => Object.assign({ where: 'cloud' }, p)), ...this.localList().map(p => Object.assign({ where: 'local' }, p))].sort((a, b) => (b.updated || 0) - (a.updated || 0)); },
+  list() { return [...this.cloud.map(p => Object.assign({ where: 'cloud' }, p)), ...(this.tg ? TgStore.list.map(p => Object.assign({ where: 'tg' }, p)) : []), ...this.localList().map(p => Object.assign({ where: 'local' }, p))].sort((a, b) => (b.updated || 0) - (a.updated || 0)); },
+  async dataOf(p) { return p.where === 'tg' ? TgStore.load(p) : p.data; },
   async save(p) {
     if (this.db) { try { await this.col().doc(p.id).set({ name: p.name, updated: p.updated, data: JSON.stringify(p.data) }); this.setLocal(this.localList().filter(x => x.id !== p.id)); return 'cloud'; } catch (e) { this.db = null; } }
+    if (this.tg) { try { await TgStore.save(p); this.setLocal(this.localList().filter(x => x.id !== p.id)); return 'tg'; } catch (e) { /* ниже — в браузер */ } }
     const l = this.localList().filter(x => x.id !== p.id); l.push(p); return this.setLocal(l) ? 'local' : 'fail';
   },
-  async remove(p) { if (p.where === 'cloud' && this.db) { try { await this.col().doc(p.id).delete(); } catch (e) { say('Не удалось удалить: нет связи с аккаунтом.', 'bad'); } } else this.setLocal(this.localList().filter(x => x.id !== p.id)); },
+  async remove(p) { if (p.where === 'cloud' && this.db) { try { await this.col().doc(p.id).delete(); } catch (e) { say('Не удалось удалить: нет связи с аккаунтом.', 'bad'); } } else if (p.where === 'tg') { try { await TgStore.remove(p); } catch (e) { say('Не удалось удалить: нет связи с Telegram.', 'bad'); } } else this.setLocal(this.localList().filter(x => x.id !== p.id)); },
   loadMats() { try { this.mats = JSON.parse(lsGet(KEY_MATS) || '[]') || []; } catch (e) { this.mats = []; } },
-  async saveMats(list) { this.mats = list; lsSet(KEY_MATS, JSON.stringify(list)); if (this.db) { try { await this.col().doc('mats').set({ items: JSON.stringify(list) }); } catch (e) { /* остаются в браузере */ } } },
+  async saveMats(list) { this.mats = list; lsSet(KEY_MATS, JSON.stringify(list)); if (this.db) { try { await this.col().doc('mats').set({ items: JSON.stringify(list) }); } catch (e) { /* остаются в браузере */ } } if (this.tg) { try { await TgStore.saveMats(list); } catch (e) { /* остаются в браузере */ } } },
+  async initTelegram(tg) { if (!(await TgStore.init(tg))) return; this.tg = true; const cm = await TgStore.loadMats(), ids = new Set(cm.map(m => m.id)); this.mats = cm.concat(this.mats.filter(m => !ids.has(m.id))); lsSet(KEY_MATS, JSON.stringify(this.mats)); },
   async init() {
     this.loadMats();
     const [db, user] = await Promise.all([capUse('db'), capUse('user')]); if (!db || !user) return;
@@ -1419,7 +1456,7 @@ async function saveProject(asNew) {
   if (asNew || !S.pid) S.pid = pidNew();
   const where = await Store.save({ id: S.pid, name: S.name || 'Без названия', updated: Date.now(), data: projData() });
   lsSet(KEY_DRAFT, JSON.stringify(S));
-  say(where === 'cloud' ? 'Проект сохранён в вашем аккаунте — откроется и на другом устройстве.' : where === 'local' ? 'Проект сохранён в этом браузере.' : 'Не удалось сохранить: память браузера недоступна. Сохраните файл проекта.', where === 'fail' ? 'bad' : 'ok');
+  say(where === 'cloud' ? 'Проект сохранён в вашем аккаунте — откроется и на другом устройстве.' : where === 'tg' ? 'Проект сохранён в Telegram — откроется в этом боте на любом вашем устройстве.' : where === 'local' ? 'Проект сохранён в этом браузере.' : 'Не удалось сохранить: память браузера недоступна. Сохраните файл проекта.', where === 'fail' ? 'bad' : 'ok'); PF.haptic(where === 'fail' ? 'warn' : 'ok');
   if (!$('#modal').hidden && $('#modal').dataset.kind === 'projects') openProjects();
 }
 function loadProject(data, pid) {
@@ -1430,12 +1467,12 @@ function loadProject(data, pid) {
 function openProjects() {
   const list = Store.list();
   const rows = list.map(p => {
-    let a = ''; try { const st = migrateState(p.data); let tot = 0; for (const r of st.rooms) { const g = roomGeom(r); if (g.poly.length >= 3) tot += Math.abs(area(g.poly)); } a = fm2(tot) + ' м²'; } catch (e) { a = ''; }
+    let a = ''; if (p.data) try { const st = migrateState(p.data); let tot = 0; for (const r of st.rooms) { const g = roomGeom(r); if (g.poly.length >= 3) tot += Math.abs(area(g.poly)); } a = fm2(tot) + ' м²'; } catch (e) { a = ''; }
     const d = p.updated ? new Date(p.updated).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : '';
-    return '<div class="pitem"><div style="min-width:0"><b>' + esc(p.name) + '</b><small>' + [a, d, p.where === 'cloud' ? 'в аккаунте' : 'в этом браузере'].filter(Boolean).join(' · ') + '</small></div><div class="acts"><button class="btn small" data-open="' + p.id + '" type="button">Открыть</button><button class="btn small danger" data-del="' + p.id + '" type="button">' + (UI.delArm === p.id ? 'Точно?' : 'Удалить') + '</button></div></div>';
+    return '<div class="pitem"><div style="min-width:0"><b>' + esc(p.name) + '</b><small>' + [a, d, p.where === 'cloud' ? 'в аккаунте' : p.where === 'tg' ? 'в Telegram' : 'в этом браузере'].filter(Boolean).join(' · ') + '</small></div><div class="acts"><button class="btn small" data-open="' + p.id + '" type="button">Открыть</button><button class="btn small danger" data-del="' + p.id + '" type="button">' + (UI.delArm === p.id ? 'Точно?' : 'Удалить') + '</button></div></div>';
   }).join('');
   openModal('<header><h2>Проекты</h2><button class="icon" data-close type="button" aria-label="Закрыть">' + ICON.del + '</button></header>' +
-    '<p class="note">' + (Store.db ? 'Проекты хранятся в вашем аккаунте и видны только вам.' : 'Проекты хранятся в этом браузере. Чтобы перенести на другое устройство, сохраните файл проекта.') + '</p>' +
+    '<p class="note">' + (Store.db ? 'Проекты хранятся в вашем аккаунте и видны только вам.' : Store.tg ? 'Проекты хранятся в облаке Telegram и открываются в этом боте на телефоне и компьютере.' : 'Проекты хранятся в этом браузере. Чтобы перенести на другое устройство, сохраните файл проекта.') + '</p>' +
     '<div class="row-btns"><button class="btn primary" data-pact="save" type="button">Сохранить текущий</button><button class="btn" data-pact="saveas" type="button">Сохранить как новый</button><button class="btn" data-pact="new" type="button">Новый проект</button></div>' +
     '<div class="plist">' + (rows || '<p class="note">Сохранённых проектов пока нет.</p>') + '</div>' +
     '<div class="row-btns"><label class="btn" for="fileIn">Открыть файл</label><input type="file" id="fileIn" accept=".json,application/json" hidden><button class="btn" data-pact="paste" type="button">Вставить текст</button><button class="btn" data-pact="export" type="button">Файл текущего</button></div>', 'projects');
@@ -1447,7 +1484,7 @@ function importText(t) {
 }
 $('#modal').addEventListener('click', async e => {
   if (e.target === $('#modal') || e.target.closest('[data-close]')) { closeModal(); return; }
-  const o = e.target.closest('[data-open]'); if (o) { const p = Store.list().find(x => x.id === o.dataset.open); if (p) { loadProject(p.data, p.id); closeModal(); say('Открыт проект «' + p.name + '».', 'ok'); } return; }
+  const o = e.target.closest('[data-open]'); if (o) { const p = Store.list().find(x => x.id === o.dataset.open); if (p) { try { loadProject(await Store.dataOf(p), p.id); closeModal(); say('Открыт проект «' + p.name + '».', 'ok'); } catch (err) { say('Не удалось открыть проект: нет связи с Telegram.', 'bad'); } } return; }
   const d = e.target.closest('[data-del]');
   if (d) { if (UI.delArm === d.dataset.del) { const p = Store.list().find(x => x.id === d.dataset.del); UI.delArm = null; if (p) { await Store.remove(p); if (S.pid === p.id) S.pid = null; say('Проект удалён.'); } } else UI.delArm = d.dataset.del; openProjects(); return; }
   const a = e.target.closest('[data-pact]'); if (!a) return;
@@ -1458,8 +1495,8 @@ $('#modal').addEventListener('click', async e => {
   else if (act === 'paste') openModal('<header><h2>Вставить проект</h2><button class="icon" data-close type="button" aria-label="Закрыть">' + ICON.del + '</button></header><textarea class="code" id="pasteArea" placeholder="Вставьте сюда текст файла проекта"></textarea><button class="btn primary" data-pact="doPaste" type="button">Открыть</button>');
   else if (act === 'doPaste') importText($('#pasteArea').value);
 });
-function openModal(html, kind) { const m = $('#modal'); $('#modalBox').innerHTML = html; m.dataset.kind = kind || ''; m.hidden = false; }
-function closeModal() { $('#modal').hidden = true; $('#modal').dataset.kind = ''; UI.delArm = null; }
+function openModal(html, kind) { const m = $('#modal'); $('#modalBox').innerHTML = html; m.dataset.kind = kind || ''; m.hidden = false; syncTgBack(); }
+function closeModal() { $('#modal').hidden = true; $('#modal').dataset.kind = ''; UI.delArm = null; syncTgBack(); }
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#modal').hidden) closeModal(); });
 
 /* ================= верх, режимы, разделитель ================= */
@@ -1487,10 +1524,65 @@ const splEnd = () => { if (spl) { spl = null; saveUI(); } };
 splitter.addEventListener('pointerup', splEnd); splitter.addEventListener('pointercancel', splEnd);
 splitter.addEventListener('keydown', e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); setMapH(mapcol.getBoundingClientRect().height + (e.key === 'ArrowDown' ? 30 : -30)); saveUI(); } });
 splitter.addEventListener('dblclick', () => { setMapH(UI.mapH > 0.6 ? 0.52 * work.clientHeight : 0.74 * work.clientHeight); saveUI(); });
-function saveUI() { lsSet(KEY_UI, JSON.stringify({ tab: UI.tab, mode: UI.mode, style: UI.style, labels: UI.labels, step: UI.step, help: UI.help, mapH: UI.mapH, room: UI.room })); }
-function loadUI() { try { const u = JSON.parse(lsGet(KEY_UI) || 'null'); if (u) Object.assign(UI, { tab: u.tab || 'plan', mode: u.mode || 'view', style: u.style || 'wood', labels: u.labels !== false, step: u.step || 10, help: u.help !== false, mapH: u.mapH || null, room: u.room || UI.room }); } catch (e) { /* по умолчанию */ } }
+function saveUI() { lsSet(KEY_UI, JSON.stringify({ tab: UI.tab, mode: UI.mode, style: UI.style, labels: UI.labels, step: UI.step, help: UI.help, mapH: UI.mapH, room: UI.room, installOff: !!UI.installOff })); }
+function loadUI() { try { const u = JSON.parse(lsGet(KEY_UI) || 'null'); if (u) Object.assign(UI, { tab: u.tab || 'plan', mode: u.mode || 'view', style: u.style || 'wood', labels: u.labels !== false, step: u.step || 10, help: u.help !== false, mapH: u.mapH || null, room: u.room || UI.room, installOff: !!u.installOff }); } catch (e) { /* по умолчанию */ } }
 function syncAll() { syncInputs(); renderPlanTab(); syncToolbar(); renderTplChips(); if (UI.tab === 'mat') renderMatTab(); if (UI.tab === 'pat') renderPatTab(); if (UI.tab === 'res') renderResults(); renderStatus(); renderPieceInfo(); }
 function measureTabs() { const t = $('#tabs'); if (t) document.documentElement.style.setProperty('--tabsH', t.offsetHeight + 'px'); }
+
+/* ================= Telegram и ярлык на экране ================= */
+const APP_URL = 'https://vidalost.github.io/Razmer/';
+function appUrl() { try { if (location.protocol === 'https:' && !window.claude && !/claude\.ai|claudeusercontent/.test(location.host)) return location.origin + location.pathname; } catch (e) { /* ниже */ } return APP_URL; }
+function tgShareLink() { const text = (S.name ? S.name + '\n' : '') + reportText().split('\n').slice(1).join('\n'); return 'https://t.me/share/url?url=' + encodeURIComponent(appUrl()) + '&text=' + encodeURIComponent(text.slice(0, 3000)); }
+document.addEventListener('click', e => {
+  const a = e.target.closest && e.target.closest('#tgShare'); if (!a) return;
+  a.href = tgShareLink();
+  if (PF.inTG) { e.preventDefault(); try { PF.tg.openTelegramLink(a.href); } catch (err) { say('Не удалось открыть выбор чата.', 'bad'); } }
+});
+let TG = null;
+function syncTgBack() {
+  if (!TG || !PF.version('6.1')) return;
+  const need = !$('#modal').hidden || !$('#pieceInfo').hidden || !!UI.addTpl || UI.tab !== 'plan';
+  try { if (need) TG.BackButton.show(); else TG.BackButton.hide(); } catch (e) { /* старый клиент */ }
+}
+function tgBack() {
+  const tabs = ['plan', 'mat', 'pat', 'res'];
+  if (!$('#modal').hidden) closeModal();
+  else if (!$('#pieceInfo').hidden) ACT['piece-close']();
+  else if (UI.addTpl) ACT['add-cancel']();
+  else if (UI.tab !== 'plan') setTab(tabs[Math.max(0, tabs.indexOf(UI.tab) - 1)]);
+  syncTgBack();
+}
+function tgColors() {
+  if (!TG || !PF.version('6.1')) return;
+  const hex = v => /^#[0-9a-f]{6}$/i.test(v) ? v : null, cs = getComputedStyle(document.documentElement);
+  try { const h = hex(cs.getPropertyValue('--panel').trim()); if (h) TG.setHeaderColor(h); } catch (e) { /* старый клиент */ }
+  try { const b = hex(cs.getPropertyValue('--paper').trim()); if (b) TG.setBackgroundColor(b); } catch (e) { /* старый клиент */ }
+  try { const b = hex(cs.getPropertyValue('--panel').trim()); if (b && PF.version('7.10')) TG.setBottomBarColor(b); } catch (e) { /* старый клиент */ }
+}
+function initTelegram(tg) {
+  TG = tg;
+  const theme = () => { document.documentElement.dataset.theme = tg.colorScheme === 'dark' ? 'dark' : 'light'; readColors(); draw(); tgColors(); };
+  theme();
+  try { tg.onEvent('themeChanged', theme); } catch (e) { /* старый клиент */ }
+  try { if (PF.version('6.1')) tg.BackButton.onClick(tgBack); } catch (e) { /* старый клиент */ }
+  syncTgBack(); renderInstall();
+  Store.initTelegram(tg).then(() => { if (!$('#modal').hidden && $('#modal').dataset.kind === 'projects') openProjects(); });
+}
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredPrompt = e; renderInstall(); });
+window.addEventListener('appinstalled', () => { deferredPrompt = null; UI.installOff = true; saveUI(); renderInstall(); say('Приложение установлено — ищите «Раскладку» на экране.', 'ok'); });
+const SHARE_ICON = '<svg class="share" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M6 11H5v10h14V11h-1"/></svg>';
+function renderInstall() {
+  const el = $('#installBox'); if (!el) return;
+  let standalone = PF.standalone; try { standalone = standalone || navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches; } catch (e) { /* как есть */ }
+  let framed = false; try { framed = window.top !== window.self; } catch (e) { framed = true; }
+  let h = '';
+  if (!standalone && !PF.inTG && !window.claude && !framed && !UI.installOff) {
+    if (deferredPrompt) h = '<h3>Значок на экране</h3><p>Установите «Раскладку» как приложение: значок на рабочем столе, открывается без адресной строки и работает без интернета.</p><div class="row-btns"><button class="btn primary" type="button" data-act="install">Установить</button><button class="btn" type="button" data-act="install-off">Не сейчас</button></div>';
+    else if (PF.ios) h = '<h3>Ярлык на экран «Домой»</h3><p>В Safari нажмите ' + SHARE_ICON + ' <b>«Поделиться»</b>, затем <b>«На экран „Домой“»</b> и <b>«Добавить»</b>. «Раскладка» откроется без адресной строки, как приложение, и будет работать без интернета на объекте.</p><div class="row-btns"><button class="btn" type="button" data-act="install-off">Понятно</button></div>';
+  }
+  el.innerHTML = h; el.hidden = !h;
+}
 
 /* ================= старт ================= */
 function start() {
@@ -1509,6 +1601,8 @@ function start() {
   new MutationObserver(retheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { readColors(); draw(); });
   Store.init();
+  renderInstall();
+  PF.ready.then(p => { if (p && p.inTG) initTelegram(p.tg); });
   try { if ('serviceWorker' in navigator && location.protocol === 'https:' && window.top === window.self && !window.claude) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) { /* без офлайна */ }
 }
 start();
