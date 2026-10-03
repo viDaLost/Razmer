@@ -26,7 +26,7 @@ const ICON = {
 
 const KEY_DRAFT = 'raskladka.draft.v1', KEY_PROJ = 'raskladka.projects.v1', KEY_MATS = 'raskladka.mats.v1', KEY_UI = 'raskladka.ui.v2';
 let S = defaultState();
-const UI = { tab: 'plan', mode: 'view', style: 'wood', labels: true, room: 'r1', target: 'floor', matTarget: 'main', catView: 'eng', sel: null, hl: null, step: 10, variants: null, help: true, mapH: null, addRoom: false, delArm: null, wallFocus: -1 };
+const UI = { tab: 'plan', mode: 'view', style: 'wood', labels: true, room: 'r1', target: 'floor', matTarget: 'main', catView: 'eng', addTpl: null, addPrev: null, sel: null, hl: null, step: 10, variants: null, help: true, mapH: null, addRoom: false, delArm: null, wallFocus: -1 };
 let MODEL = null;
 
 /* ================= расчёт ================= */
@@ -315,7 +315,54 @@ function render(ctx, W, H, vw, opt) {
   }
   // названия комнат в режимах «Стены» и «Комнаты»
   if (live && (UI.mode === 'rooms' || UI.mode === 'walls')) {
-    for (const r of S.rooms) { const G = geo[r.id]; if (!G || !G.g) continue; const c = centroid(G.g.poly); pillText(ctx, r.name + (G.err ? ' — ошибка' : ' · ' + fm2(Math.abs(area(G.g.poly))) + ' м²'), X(c[0]), Y(c[1]), r.id === UI.room ? COL.chalk : COL.ink, r.id === UI.room ? COL.onChalk : COL.panel, 'center'); }
+    for (const r of S.rooms) { const G = geo[r.id]; if (!G || !G.g) continue; const c = centroid(G.g.poly), off = UI.mode === 'rooms' && r.id === UI.room ? 30 : 0; pillText(ctx, r.name + (G.err ? ' — ошибка' : ' · ' + fm2(Math.abs(area(G.g.poly))) + ' м²'), X(c[0]), Y(c[1]) + off, r.id === UI.room ? COL.chalk : COL.ink, r.id === UI.room ? COL.onChalk : COL.panel, 'center'); }
+  }
+  // режим «Комнаты»: перемещение, поворот, новая комната
+  if (live && UI.mode === 'rooms') {
+    const h = !UI.addTpl && R && rotHandle(R.id);
+    if (h) {
+      ctx.strokeStyle = COL.chalk; ctx.lineWidth = 2; ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.moveTo(h.tx, h.ty); ctx.lineTo(h.sx, h.sy + 13); ctx.stroke(); ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(h.sx, h.sy, 14, 0, Math.PI * 2); ctx.fillStyle = COL.chalk; ctx.fill();
+      ctx.strokeStyle = COL.onChalk; ctx.fillStyle = COL.onChalk; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(h.sx, h.sy, 7, -Math.PI * 0.9, Math.PI * 0.55); ctx.stroke();
+      const ea = Math.PI * 0.55; arrowHead(ctx, h.sx + Math.cos(ea) * 7, h.sy + Math.sin(ea) * 7, [-Math.sin(ea), Math.cos(ea)]);
+      ctx.beginPath(); ctx.arc(h.cx, h.cy, 15, 0, Math.PI * 2); ctx.fillStyle = COL.panel; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = COL.chalk; ctx.stroke();
+      ctx.fillStyle = COL.chalk; for (const d of [[1, 0], [-1, 0], [0, 1], [0, -1]]) arrowHead(ctx, h.cx + d[0] * 8, h.cy + d[1] * 8, d);
+      ctx.beginPath(); ctx.moveTo(h.cx - 8, h.cy); ctx.lineTo(h.cx + 8, h.cy); ctx.moveTo(h.cx, h.cy - 8); ctx.lineTo(h.cx, h.cy + 8); ctx.strokeStyle = COL.chalk; ctx.lineWidth = 1.6; ctx.stroke();
+    }
+    if (UI.addPrev) {
+      const [a, b] = UI.addPrev, A = [X(Math.min(a[0], b[0])), Y(Math.min(a[1], b[1]))], B = [X(Math.max(a[0], b[0])), Y(Math.max(a[1], b[1]))];
+      if (UI.addTpl === 'rect') {
+        ctx.fillStyle = 'rgba(29,107,214,.12)'; ctx.fillRect(A[0], A[1], B[0] - A[0], B[1] - A[1]);
+        ctx.setLineDash([7, 5]); ctx.strokeStyle = COL.chalk; ctx.lineWidth = 2.5; ctx.strokeRect(A[0], A[1], B[0] - A[0], B[1] - A[1]); ctx.setLineDash([]);
+        pillText(ctx, mm(Math.abs(b[0] - a[0])) + ' × ' + mm(Math.abs(b[1] - a[1])) + ' мм', (A[0] + B[0]) / 2, (A[1] + B[1]) / 2, COL.chalk, COL.onChalk, 'center');
+      } else { const q = w2s(b[0], b[1]); ctx.beginPath(); ctx.arc(q[0], q[1], 9, 0, Math.PI * 2); ctx.fillStyle = COL.chalk; ctx.fill(); }
+    }
+  }
+  // режим «Рисунок»: опорная стена и стрелка направления
+  const gz = live ? gizmo() : null;
+  if (gz) {
+    const rw = refWallOf(gz.u);
+    if (rw) {
+      ctx.save(); ctx.strokeStyle = COL.chalk; ctx.globalAlpha = 0.55; ctx.lineWidth = 9; ctx.lineCap = 'round'; ctx.beginPath(); rw.pts.forEach((q, j) => { const t = w2s(q[0], q[1]); j ? ctx.lineTo(t[0], t[1]) : ctx.moveTo(t[0], t[1]); }); ctx.stroke(); ctx.restore();
+      const m = rw.pts[Math.floor(rw.pts.length / 2)], m2 = rw.pts.length === 2 ? [(rw.pts[0][0] + rw.pts[1][0]) / 2, (rw.pts[0][1] + rw.pts[1][1]) / 2] : m, t = w2s(m2[0], m2[1]);
+      pillText(ctx, 'опорная стена', t[0], t[1], COL.chalk, COL.onChalk, 'center');
+    }
+    const { cx, cy, tx, ty, L, F } = gz, e1 = F.e1, a1 = Math.atan2(e1[1], e1[0]), a2 = Math.atan2(F.eu[1], F.eu[0]);
+    ctx.save();
+    ctx.globalAlpha = 0.6; ctx.fillStyle = COL.panel; ctx.beginPath(); ctx.arc(cx, cy, L + 14, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+    ctx.strokeStyle = COL.muted; ctx.lineWidth = 1; ctx.setLineDash([3, 4]); ctx.beginPath(); ctx.arc(cx, cy, L, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx - e1[0] * (L + 10), cy - e1[1] * (L + 10)); ctx.lineTo(cx + e1[0] * (L + 10), cy + e1[1] * (L + 10)); ctx.stroke(); ctx.setLineDash([]);
+    let da = a2 - a1; while (da <= -Math.PI) da += 2 * Math.PI; while (da > Math.PI) da -= 2 * Math.PI;
+    if (Math.abs(da) > 0.01) { ctx.strokeStyle = COL.tape; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(cx, cy, L * 0.42, a1, a1 + da, da < 0); ctx.stroke(); }
+    ctx.strokeStyle = COL.chalk; ctx.fillStyle = COL.chalk; ctx.lineWidth = 4; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(cx - F.eu[0] * L * 0.55, cy - F.eu[1] * L * 0.55); ctx.lineTo(tx - F.eu[0] * 14, ty - F.eu[1] * 14); ctx.stroke();
+    ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx - F.ev[0] * 14, cy - F.ev[1] * 14); ctx.lineTo(cx + F.ev[0] * 14, cy + F.ev[1] * 14); ctx.stroke();
+    ctx.beginPath(); ctx.arc(tx, ty, 14, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = COL.onChalk; ctx.fillStyle = COL.onChalk; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(tx, ty, 7, -Math.PI * 0.9, Math.PI * 0.55); ctx.stroke();
+    const ea = Math.PI * 0.55; arrowHead(ctx, tx + Math.cos(ea) * 7, ty + Math.sin(ea) * 7, [-Math.sin(ea), Math.cos(ea)]);
+    const mid = a1 + da / 2, P = gz.u.P;
+    pillText(ctx, f1(shownAngle(P)) + '°', cx + Math.cos(mid + (Math.abs(da) < 0.3 ? Math.PI : 0)) * L * 0.7, cy + Math.sin(mid + (Math.abs(da) < 0.3 ? Math.PI : 0)) * L * 0.7, COL.tape, '#3b2a00', 'center');
+    ctx.restore();
   }
   // ручки
   if (live && UI.mode === 'walls' && RG && RG.g) {
@@ -412,9 +459,9 @@ let msgTimer = 0;
 function say(text, kind, sticky) { const el = $('#msg'); el.textContent = text; el.className = 'msg' + (kind ? ' ' + kind : ''); clearTimeout(msgTimer); if (!sticky) msgTimer = setTimeout(modeHint, clamp(3000 + text.length * 50, 4000, 12000)); }
 const MODE_HINT = {
   view: 'Нажмите на доску — покажу, как её пилить. Карту двигайте пальцем, масштаб — двумя.',
-  pattern: 'Тяните рисунок пальцем или жмите стрелки — подрезки пересчитываются сразу.',
+  pattern: 'Тяните рисунок пальцем. Круглая ручка на стрелке поворачивает направление. Нажмите на стену — рисунок пойдёт вдоль неё.',
   walls: 'Кружки — углы, ромбы — середины стен. Потяните ромб, и стена станет дугой.',
-  rooms: 'Тяните комнату пальцем — у соседней стены она прилипнет.',
+  rooms: 'Тяните комнату пальцем — у соседней стены она прилипнет. Круглая ручка сверху — поворот. «+ Комната» — добавить на карту.',
 };
 function modeHint() { const el = $('#msg'); el.className = 'msg'; el.textContent = MODE_HINT[UI.mode] || ''; }
 function renderStatus() {
@@ -499,13 +546,79 @@ function drawPlank(c, p, M) {
 const ptrs = new Map(); let gest = null;
 const s2w = (x, y) => [(x - CW / 2) / view.s + view.cx, (y - CH / 2) / view.s + view.cy];
 const w2s = (x, y) => [(x - view.cx) * view.s + CW / 2, (y - view.cy) * view.s + CH / 2];
+const rot2 = (p, c, a) => { const cs = Math.cos(a), sn = Math.sin(a), dx = p[0] - c[0], dy = p[1] - c[1]; return [c[0] + dx * cs - dy * sn, c[1] + dx * sn + dy * cs]; };
 function roomAt(w) { for (let i = S.rooms.length - 1; i >= 0; i--) { const G = MODEL && MODEL.geo[S.rooms[i].id]; if (G && G.g && inPoly(w[0], w[1], G.g.poly)) return S.rooms[i].id; } return null; }
+function roomCenter(r) { const G = MODEL && MODEL.geo[r.id], g = G && G.g ? G.g : roomGeom(r); return centroid(g.poly); }
+function rotHandle(rid) {
+  const G = MODEL && MODEL.geo[rid]; if (!G || !G.g) return null;
+  const b = bboxOf(G.g.poly), C = centroid(G.g.poly), top = w2s(C[0], b.v0), c = w2s(C[0], C[1]);
+  return { C, sx: top[0], sy: top[1] - 36, tx: top[0], ty: top[1], cx: c[0], cy: c[1] };
+}
+function rotateRoomBy(r, deg) { const C = roomCenter(r), p = rot2([num(r.x0), num(r.y0)], C, deg * DEG); r.x0 = Math.round(p[0]); r.y0 = Math.round(p[1]); r.a0 = mod(num(r.a0) + deg, 360); }
+/* углы прилипают к 90°, 45° и 15° */
+function snapAngle(a) { for (const [step, tol] of [[90, 5], [45, 3], [15, 2]]) { const k = Math.round(a / step) * step; if (Math.abs(a - k) < tol) return k; } return Math.round(a); }
+/* точка прилипает к углам других комнат с учётом толщины стены */
+function snapPoint(w, skipRid) {
+  const T = Math.max(0, num(S.set.wallT, 120)), th = 14 / view.s; let bx = null, by = null;
+  for (const o of S.rooms) {
+    if (o.id === skipRid) continue; const G = MODEL && MODEL.geo[o.id]; if (!G || !G.g) continue;
+    for (const c of G.g.corners) for (const kk of [0, T, -T]) {
+      const sx = c[0] + kk - w[0], sy = c[1] + kk - w[1];
+      if (Math.abs(sx) < th && (bx === null || Math.abs(sx) < Math.abs(bx))) bx = sx;
+      if (Math.abs(sy) < th && (by === null || Math.abs(sy) < Math.abs(by))) by = sy;
+    }
+  }
+  return [Math.round(bx !== null ? w[0] + bx : Math.round(w[0] / 10) * 10), Math.round(by !== null ? w[1] + by : Math.round(w[1] / 10) * 10)];
+}
+/* направление рисунка: стрелка на карте и поворот вокруг центра области */
+function dirRegion(u) { return u.kind === 'ins' ? u.ins.region : MODEL.geo[u.refRoom].center; }
+function dirCtx(key) {
+  const res = MODEL && MODEL.byKey[key]; if (!res || res.err || res.unit.kind === 'border') return null;
+  const u = res.unit, F = u.parts[0].frame, C = centroid(dirRegion(u)), L = F.toL(C);
+  return { A: F.A, e1: F.e1, e2: F.e2, C, cu: L[0], cv: L[1] };
+}
+const fullAngle = P => mod(E.dirDeg(P) + (P.flipU ? 180 : 0), 360);
+function shownAngle(P) { const g = patDef(P.type).group, a = fullAngle(P); return g === 'bond' || g === 'basket' ? mod(a, 180) : a; }
+/* θ — куда смотрит стрелка относительно опорной стены; рисунок поворачивается вокруг центра комнаты */
+function setDirection(P, theta, c) {
+  let rho = mod((P.flipU ? theta - 180 : theta) + 180, 360) - 180; rho = Math.round(rho * 10) / 10;
+  P.dir = Math.abs(rho) < 0.05 ? 'along' : Math.abs(rho - 90) < 0.05 ? 'across' : Math.abs(rho - 45) < 0.05 ? 'diag' : 'custom';
+  if (P.dir === 'custom') P.angle = rho;
+  if (!c) return;
+  const F1 = E.makeFrame(c.A, c.e1, c.e2, Object.assign({}, P, { offA: 0, offB: 0 }));
+  const O = [c.C[0] - (c.cu * F1.eu[0] + c.cv * F1.ev[0]), c.C[1] - (c.cu * F1.eu[1] + c.cv * F1.ev[1])];
+  P.offA = Math.round((O[0] - c.A[0]) * c.e1[0] + (O[1] - c.A[1]) * c.e1[1]);
+  P.offB = Math.round((O[0] - c.A[0]) * c.e2[0] + (O[1] - c.A[1]) * c.e2[1]);
+}
+function gizmo() {
+  if (!MODEL || UI.mode !== 'pattern') return null;
+  const res = MODEL.byKey[UI.target]; if (!res || res.err || res.unit.kind === 'border') return null;
+  const u = res.unit, F = u.parts[0].frame, C = centroid(dirRegion(u)), c = w2s(C[0], C[1]), L = Math.round(clamp(Math.min(CW, CH) * 0.17, 38, 62));
+  return { res, u, F, C, cx: c[0], cy: c[1], tx: c[0] + F.eu[0] * L, ty: c[1] + F.eu[1] * L, L };
+}
+function refWallOf(u) {
+  if (!u || u.kind === 'ins' || u.kind === 'border') return null;
+  const G = MODEL.geo[u.refRoom]; if (!G || !G.g) return null;
+  const g = G.g, i = clamp(num(u.P.refWall) | 0, 0, g.n - 1), Lp = g.poly.length, s = g.wIdx[i], e = i + 1 < g.n ? g.wIdx[i + 1] : Lp, pts = [];
+  for (let k = s; k <= e; k++) pts.push(g.poly[k % Lp]);
+  return { pts, i, rid: u.refRoom };
+}
+function wallAt(sx, sy, rids) {
+  let best = 16, hit = null;
+  for (const rid of rids) {
+    const G = MODEL.geo[rid]; if (!G || !G.g) continue; const g = G.g;
+    for (let i = 0; i < g.n; i++) { if (Math.abs(g.arcs[i]) >= 0.5) continue; const a = w2s(g.corners[i][0], g.corners[i][1]), q = g.corners[(i + 1) % g.n], b = w2s(q[0], q[1]), d = segDist(sx, sy, a, b); if (d < best) { best = d; hit = { rid, i }; } }
+  }
+  return hit;
+}
 function startGesture() {
   const pts = [...ptrs.values()];
-  if (pts.length >= 2) { const a = pts[0], b = pts[1], mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2; gest = { type: 'pinch', d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, s0: view.s, w: s2w(mx, my), moved: true }; return; }
+  if (pts.length >= 2) { const a = pts[0], b = pts[1], mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2; gest = { type: 'pinch', d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, s0: view.s, w: s2w(mx, my), moved: true }; UI.addPrev = null; return; }
   const p = pts[0], R = curRoom(), RG = R && MODEL && MODEL.geo[R.id];
   gest = { type: 'pan', sx: p.x, sy: p.y, moved: false, cx: view.cx, cy: view.cy };
   if (UI.mode === 'pattern') {
+    const gz = gizmo();
+    if (gz && Math.hypot(p.x - gz.tx, p.y - gz.ty) < 26) { Object.assign(gest, { type: 'prot', c: dirCtx(UI.target), P: curP() }); return; }
     const res = MODEL && MODEL.byKey[UI.target];
     if (res && !res.err) { const P = curP(), F = res.unit.parts[0].frame; Object.assign(gest, { type: 'pattern', P, F, offA: num(P.offA), offB: num(P.offB), kind: res.unit.kind }); }
   } else if (UI.mode === 'walls' && RG && RG.g) {
@@ -514,9 +627,12 @@ function startGesture() {
     for (let i = 0; i < g.n; i++) { const h = midHandle(g, i), sc = w2s(h[0], h[1]), d = Math.hypot(sc[0] - p.x, sc[1] - p.y); if (d < best) { best = d; hit = { type: 'bend', i }; } }
     if (hit) Object.assign(gest, hit, { rid: R.id, g });
   } else if (UI.mode === 'rooms') {
+    if (UI.addTpl) { Object.assign(gest, { type: 'add', w0: snapPoint(s2w(p.x, p.y), null) }); return; }
+    const h = R && rotHandle(R.id);
+    if (h && Math.hypot(p.x - h.sx, p.y - h.sy) < 26) { const w = s2w(p.x, p.y); Object.assign(gest, { type: 'rrot', rid: R.id, C: h.C, x0: num(R.x0), y0: num(R.y0), a0: num(R.a0), phi0: Math.atan2(w[1] - h.C[1], w[0] - h.C[0]) }); return; }
     const rid = roomAt(s2w(p.x, p.y));
     if (rid) {
-      if (rid !== UI.room) { UI.room = rid; renderPlanTab(); }
+      if (rid !== UI.room) { UI.room = rid; renderPlanTab(); renderCtxbar(); }
       const r = room(rid), others = [];
       for (const o of S.rooms) if (o.id !== rid) { const G = MODEL.geo[o.id]; if (G && G.g) others.push(...G.g.corners); }
       Object.assign(gest, { type: 'room', rid, x0: num(r.x0), y0: num(r.y0), mine: MODEL.geo[rid].g.corners.map(q => q.slice()), others });
@@ -542,6 +658,11 @@ cv.addEventListener('pointermove', e => {
     gest.P.offA = Math.round(gest.offA + wx * F.e1[0] + wy * F.e1[1]);
     if (gest.kind !== 'border') gest.P.offB = Math.round(gest.offB + wx * F.e2[0] + wy * F.e2[1]);
     syncPatInputs(); clearVariantMark(); invalidate();
+  } else if (gest.type === 'prot' && gest.c) {
+    const w = s2w(p.x, p.y), c = gest.c, d = [w[0] - c.C[0], w[1] - c.C[1]];
+    const th = snapAngle(Math.atan2(d[0] * c.e2[0] + d[1] * c.e2[1], d[0] * c.e1[0] + d[1] * c.e1[1]) / DEG);
+    setDirection(gest.P, th, c); syncPatInputs(); syncPatternUI(); clearVariants();
+    say('Угол к опорной стене: ' + f1(shownAngle(gest.P)) + '°. У 0°, 45° и 90° стрелка прилипает.', null, true); invalidate();
   } else if (gest.type === 'corner') {
     const w = s2w(p.x, p.y), g = gest.g, pts = g.corners.map(q => q.slice()), n = pts.length, i = gest.i, snap = 10 / view.s;
     let x = Math.round(w[0] / 5) * 5, y = Math.round(w[1] / 5) * 5;
@@ -565,16 +686,50 @@ cv.addEventListener('pointermove', e => {
     if (bx !== null) ddx += bx; else ddx = Math.round(ddx / 10) * 10;
     if (by !== null) ddy += by; else ddy = Math.round(ddy / 10) * 10;
     const r = room(gest.rid); r.x0 = Math.round(gest.x0 + ddx); r.y0 = Math.round(gest.y0 + ddy); invalidate();
+  } else if (gest.type === 'rrot') {
+    const w = s2w(p.x, p.y), phi = Math.atan2(w[1] - gest.C[1], w[0] - gest.C[0]);
+    const na = snapAngle(gest.a0 + (phi - gest.phi0) / DEG), delta = na - gest.a0;
+    const r = room(gest.rid), q = rot2([gest.x0, gest.y0], gest.C, delta * DEG);
+    r.x0 = Math.round(q[0]); r.y0 = Math.round(q[1]); r.a0 = mod(na, 360);
+    say('Поворот: стена 1 под ' + mm(mod(na, 360)) + '° к горизонтали. У 0°, 45° и 90° комната прилипает.', null, true); invalidate();
+  } else if (gest.type === 'add') {
+    const w1 = snapPoint(s2w(p.x, p.y), null); UI.addPrev = [gest.w0, w1];
+    say(UI.addTpl === 'rect' ? 'Комната ' + mm(Math.abs(w1[0] - gest.w0[0])) + ' × ' + mm(Math.abs(w1[1] - gest.w0[1])) + ' мм' : 'Отпустите, где поставить комнату.', null, true); draw();
   }
 });
+function placeRoomAt(tplId, w) {
+  const t = TEMPLATES.find(x => x.id === tplId) || TEMPLATES[0];
+  const walls = tplId === 'rect' ? rectWalls(4200, 3600) : t.make(), g = roomGeom({ x0: 0, y0: 0, a0: 0, walls }), b = bboxOf(g.poly);
+  const r = newRoom(tplId === 'rect' ? 'Комната ' + (S.rooms.length + 1) : t.name, walls, Math.round(w[0] - (b.u0 + b.u1) / 2), Math.round(w[1] - (b.v0 + b.v1) / 2));
+  finishAdd(r);
+}
+function finishAdd(r) {
+  S.rooms.push(r); UI.room = r.id; UI.addTpl = null; UI.addPrev = null;
+  afterRooms('Комната «' + r.name + '» добавлена. Тяните её пальцем, круглая ручка сверху — поворот. Проём в соседнюю комнату — на шаге 1.');
+  renderCtxbar();
+}
 function endPointer(e) {
   if (!ptrs.has(e.pointerId)) return;
-  const g = gest, wasTap = g && !g.moved && g.type !== 'pinch' && ptrs.size === 1;
+  const g = gest, last = ptrs.get(e.pointerId), wasTap = g && !g.moved && g.type !== 'pinch' && ptrs.size === 1;
   ptrs.delete(e.pointerId);
-  if (wasTap) selectAt(g.sx, g.sy);
+  if (g && g.type === 'add' && ptrs.size === 0) {
+    UI.addPrev = null;
+    if (!g.moved) placeRoomAt(UI.addTpl, g.w0);
+    else {
+      const w1 = snapPoint(s2w(last.x, last.y), null);
+      if (UI.addTpl !== 'rect') placeRoomAt(UI.addTpl, w1);
+      else {
+        const W = Math.abs(w1[0] - g.w0[0]), H = Math.abs(w1[1] - g.w0[1]);
+        if (W < 500 || H < 500) { say('Слишком маленькая комната: тяните дальше (не меньше 500 × 500 мм) или просто нажмите на карту.', 'bad'); draw(); }
+        else finishAdd(newRoom('Комната ' + (S.rooms.length + 1), rectWalls(W, H), Math.min(g.w0[0], w1[0]), Math.min(g.w0[1], w1[1])));
+      }
+    }
+    gest = null; return;
+  }
+  if (wasTap && g.type !== 'prot' && g.type !== 'rrot') selectAt(g.sx, g.sy);
   if (ptrs.size) startGesture(); else gest = null;
-  if (g && g.moved && ['corner', 'bend', 'room'].includes(g.type)) { renderPlanTab(); invalidate({ fast: true }); }
-  if (g && g.moved && g.type === 'pattern') invalidate({ fast: true });
+  if (g && g.moved && ['corner', 'bend', 'room', 'rrot'].includes(g.type)) { renderPlanTab(); invalidate({ fast: true }); }
+  if (g && g.moved && (g.type === 'pattern' || g.type === 'prot')) { renderCtxbar(); invalidate({ fast: true }); }
 }
 cv.addEventListener('pointerup', endPointer);
 cv.addEventListener('pointercancel', endPointer);
@@ -585,15 +740,56 @@ cv.addEventListener('wheel', e => {
 }, { passive: false });
 function selectAt(x, y) {
   if (!MODEL) return; const w = s2w(x, y);
+  if (UI.mode === 'pattern') {
+    const res = MODEL.byKey[UI.target], u = res && !res.err ? res.unit : null;
+    const hit = u && (u.kind === 'floor' || u.kind === 'room') ? wallAt(x, y, u.roomIds) : null;
+    if (hit) {
+      const P = curP(); P.refWall = hit.i; if (u.kind === 'floor') P.refRoom = hit.rid; P.dir = 'along';
+      clearVariants(); recomputeNow(); centerTarget(UI.target, true); syncPatInputs(); syncPatternUI(); renderRefSelects(); renderCtxbar(); invalidate({ fast: true });
+      say('Рисунок пошёл вдоль стены ' + (hit.i + 1) + (S.rooms.length > 1 ? ' (' + roomName(hit.rid) + ')' : '') + '. «Поперёк» и стрелка меняют угол.', 'ok');
+      return;
+    }
+  }
   const rid = roomAt(w);
-  if (rid && rid !== UI.room) { UI.room = rid; renderPlanTab(); if (UI.tab === 'pat') renderPatTab(); }
+  if (rid && rid !== UI.room) { UI.room = rid; renderPlanTab(); renderCtxbar(); if (UI.tab === 'pat') renderPatTab(); }
   let found = null;
   for (let ui = MODEL.units.length - 1; ui >= 0 && !found; ui--) {
     const res = MODEL.units[ui]; if (res.err) continue;
     for (const p of res.pieces) { for (const part of p.w) { const b = bboxOf(part); if (w[0] < b.u0 || w[0] > b.u1 || w[1] < b.v0 || w[1] > b.v1) continue; if (inPoly(w[0], w[1], part)) { found = { key: res.unit.key, id: p.id }; break; } } if (found) break; }
   }
+  if (UI.mode === 'pattern' && found && found.key !== UI.target) {
+    UI.target = found.key; UI.variants = null; syncPatInputs(); syncPatternUI(); renderCtxbar(); renderStatus(); if (UI.tab === 'pat') renderPatTab();
+    say('Двигаю: ' + unitName(found.key).toLowerCase() + '.', 'ok'); draw(); return;
+  }
   UI.sel = found && !(UI.sel && UI.sel.key === found.key && UI.sel.id === found.id) ? found : null;
   renderPieceInfo(); draw();
+}
+/* полоса действий под панелью инструментов: зависит от режима карты */
+function renderCtxbar() {
+  const el = $('#ctxbar'); if (!el) return; let h = '';
+  if (UI.mode === 'rooms') {
+    if (UI.addTpl) {
+      h = '<span class="ctx-t"><b>Нажмите на карту</b> — комната встанет туда' + (UI.addTpl === 'rect' ? '. Или нарисуйте прямоугольник пальцем' : '') + '.</span>' +
+        TEMPLATES.map(t => '<button class="chip" type="button" data-act="add-tpl" data-tpl="' + t.id + '" aria-pressed="' + (UI.addTpl === t.id) + '">' + esc(t.name) + '</button>').join('') +
+        '<button class="btn small" type="button" data-act="add-cancel">Отмена</button>';
+    } else {
+      const r = curRoom();
+      h = '<button class="btn small primary" type="button" data-act="add-start">' + ICON.plus + 'Комната</button>' +
+        (r ? '<span class="ctx-t">' + esc(r.name) + ':</span><button class="btn small" type="button" data-act="room-rotl" title="Повернуть против часовой стрелки">↺ 90°</button><button class="btn small" type="button" data-act="room-rotr" title="Повернуть по часовой стрелке">↻ 90°</button><button class="btn small" type="button" data-act="room-dup">Копия</button>' +
+          (S.rooms.length > 1 ? '<button class="btn small danger" type="button" data-act="room-del">' + (UI.delArm === 'room:' + r.id ? 'Точно удалить?' : 'Удалить') + '</button>' : '') : '');
+    }
+  } else if (UI.mode === 'pattern') {
+    const kind = targetKind(UI.target), P = curP();
+    if (kind === 'border') h = '<span class="ctx-t">Рамка идёт вдоль стен. Стрелки ◀ ▶ внизу сдвигают стыки.</span>';
+    else {
+      const g = patDef(P.type).group, axis = g === 'herring' || g === 'chevron';
+      h = '<div class="seg mini" role="group" aria-label="Направление"><button type="button" data-act="dir" data-v="along" aria-pressed="' + (P.dir === 'along') + '">' + (axis ? 'Ось вдоль' : 'Вдоль') + '</button><button type="button" data-act="dir" data-v="across" aria-pressed="' + (P.dir === 'across') + '">Поперёк</button><button type="button" data-act="dir" data-v="diag" aria-pressed="' + (P.dir === 'diag') + '">45°</button></div>' +
+        '<button class="btn small" type="button" data-act="rot-step" data-v="-15" title="Повернуть рисунок на 15° против часовой">↺ 15°</button><button class="btn small" type="button" data-act="rot-step" data-v="15" title="Повернуть рисунок на 15° по часовой">↻ 15°</button>' +
+        '<label class="inp ang" title="Угол к опорной стене"><input id="ctxAngle" inputmode="decimal" value="' + f1(shownAngle(P)) + '" aria-label="Угол рисунка к опорной стене"><i>°</i></label>' +
+        '<button class="btn small" type="button" data-act="flipU" title="Развернуть рисунок в обратную сторону">⇄ Развернуть</button>';
+    }
+  }
+  el.innerHTML = h; el.hidden = !h;
 }
 
 /* ================= панель: вкладки и поля ================= */
@@ -615,12 +811,13 @@ function syncInputs() {
   syncPatInputs();
   setIn($('#projName'), S.name || '');
 }
-function syncPatInputs() { const P = curP(); $$('[data-pk]').forEach(el => setIn(el, P[el.dataset.pk])); }
+function syncPatInputs() { const P = curP(); $$('[data-pk]').forEach(el => setIn(el, P[el.dataset.pk])); const ca = $('#ctxAngle'); if (ca) setIn(ca, Math.round(shownAngle(P) * 10) / 10); }
 function readIn(t) { if (t.type === 'checkbox') return t.checked; if ('num' in t.dataset) { if (String(t.value).trim() === '') return undefined; const v = num(t.value, NaN); return Number.isFinite(v) ? v : undefined; } return t.value; }
 document.addEventListener('input', e => {
   const t = e.target; if (!(t instanceof HTMLElement) || !t.closest('.app')) return;
   if (t.id === 'projName') { S.name = t.value; invalidate(); return; }
   if (t.id === 'matUseMain') return;
+  if (t.id === 'ctxAngle') { const v = num(t.value, NaN), c = dirCtx(UI.target); if (!Number.isFinite(v) || !c) return; setDirection(curP(), v + (shownAngle(curP()) !== fullAngle(curP()) && fullAngle(curP()) >= 180 ? 180 : 0), c); clearVariants(); syncPatternUI(); invalidate(); return; }
   if (t.dataset.k) { const v = readIn(t); if (v === undefined) return; setK(t.dataset.k, v); invalidate(); return; }
   if (t.dataset.mk) { const v = readIn(t); if (v === undefined) return; const m = curMat(true); m[t.dataset.mk] = v; m.item = null; const tk = UI.matTarget === 'main' ? 'floor' : UI.matTarget; if (t.dataset.mk === 'shape' && v === 'chevron' && targetKind(tk) !== 'border') setPatternType(patOf(tk), 'chevron'); renderSizes(); invalidate(); return; }
   if (t.dataset.pk) { const v = readIn(t); if (v === undefined) return; const P = curP(); P[t.dataset.pk] = v; clearVariantMark(); if (['refRoom', 'refWall'].includes(t.dataset.pk)) { renderRefSelects(); recomputeNow(); centerTarget(UI.target, true); } if (t.dataset.pk === 'chevAngle') renderPatList(); invalidate(); return; }
@@ -736,8 +933,14 @@ const ACT = {
   'room-add-rect': () => { const L = num($('#newL').value), W = num($('#newW').value); if (!(L >= 300 && W >= 300)) { say('Впишите длину и ширину новой комнаты в миллиметрах.', 'bad'); return; } addRoom(rectWalls(L, W), 'Комната ' + (S.rooms.length + 1)); },
   'room-add-tpl': b => { const t = TEMPLATES.find(x => x.id === b.dataset.tpl); if (t) addRoom(t.make(), t.name); },
   'room-dup': () => { const r = curRoom(), c = deep(r), b = floorBBox(), rb = bboxOf(roomGeom(r).poly); c.id = newId('r'); c.name = r.name + ' (копия)'; c.x0 = Math.round((b ? b.u1 : rb.u1) + 1000 + (num(r.x0) - rb.u0)); c.y0 = Math.round(num(r.y0) + ((b ? b.v0 : rb.v0) - rb.v0)); c.doors = []; S.rooms.push(c); UI.room = c.id; view.fitted = false; afterRooms('Копия добавлена справа.'); fitView(); draw(); },
-  'room-rot': () => { const r = curRoom(); r.a0 = mod(num(r.a0) + 90, 360); afterRooms('Комната повёрнута на 90°.'); },
-  'room-del': () => { const r = curRoom(); if (UI.delArm !== 'room:' + r.id) { UI.delArm = 'room:' + r.id; renderRoomEditor(); return; } S.rooms = S.rooms.filter(x => x.id !== r.id); UI.delArm = null; UI.room = S.rooms[0].id; afterRooms('Комната удалена.'); },
+  'room-rot': () => { rotateRoomBy(curRoom(), 90); afterRooms('Комната повёрнута на 90° по часовой стрелке.'); },
+  'room-rotl': () => { rotateRoomBy(curRoom(), -90); afterRooms('Комната повёрнута на 90° против часовой стрелки.'); },
+  'room-rotr': () => { rotateRoomBy(curRoom(), 90); afterRooms('Комната повёрнута на 90° по часовой стрелке.'); },
+  'add-start': () => { UI.addTpl = 'rect'; renderCtxbar(); draw(); say('Нажмите на карту, где поставить комнату, или нарисуйте прямоугольник пальцем.', null, true); },
+  'add-tpl': b => { UI.addTpl = b.dataset.tpl; renderCtxbar(); say('Нажмите на карту, где поставить «' + (TEMPLATES.find(t => t.id === b.dataset.tpl) || {}).name + '».', null, true); },
+  'add-cancel': () => { UI.addTpl = null; UI.addPrev = null; renderCtxbar(); modeHint(); draw(); },
+  'rot-step': b => { const c = dirCtx(UI.target); if (!c) return; const P = curP(); setDirection(P, fullAngle(P) + num(b.dataset.v), c); clearVariants(); syncPatInputs(); syncPatternUI(); renderCtxbar(); invalidate({ fast: true }); say('Угол к опорной стене: ' + f1(shownAngle(P)) + '°.'); },
+  'room-del': () => { const r = curRoom(); if (UI.delArm !== 'room:' + r.id) { UI.delArm = 'room:' + r.id; renderRoomEditor(); renderCtxbar(); return; } S.rooms = S.rooms.filter(x => x.id !== r.id); UI.delArm = null; UI.room = S.rooms[0].id; afterRooms('Комната удалена.'); },
   'room-rect': () => { const L = num($('#rL').value), W = num($('#rW').value); if (!(L >= 300 && W >= 300)) { say('Впишите длину и ширину в миллиметрах.', 'bad'); return; } const r = curRoom(); r.walls = rectWalls(L, W); r.doors = (r.doors || []).filter(d => d.wall < 4); afterRooms(); },
   'room-tpl': b => { const t = TEMPLATES.find(x => x.id === b.dataset.tpl); if (!t) return; const r = curRoom(); r.walls = t.make(); r.doors = []; afterRooms('Форма «' + t.name + '»: поправьте длины стен под свою комнату.'); },
   'wall-shape': b => { const r = curRoom(), w = r.walls[+b.dataset.w]; if (!w) return; if (b.dataset.v === 'arc') { if (Math.abs(num(w.arc)) < 0.5) w.arc = Math.round(num(w.len) * 0.12 / 10) * 10 || 100; r.doors = (r.doors || []).filter(d => d.wall !== +b.dataset.w); } else w.arc = 0; UI.wallFocus = +b.dataset.w; renderRoomEditor(); invalidate({ fast: true }); },
@@ -757,15 +960,15 @@ const ACT = {
   'tone': b => { const m = curMat(true); m.tone = b.dataset.tone; renderTones(); invalidate(); if (UI.tab === 'pat') renderPatList(); },
   'save-custom': () => saveCustom(),
   // рисунок
-  'pat-target': b => { UI.target = b.dataset.key; UI.variants = null; renderPatTab(); renderStatus(); draw(); },
-  'pat': b => { const P = curP(); setPatternType(P, b.dataset.pat); clearVariants(); recomputeNow(); centerTarget(UI.target, true); renderPatTab(); invalidate({ fast: true }); },
-  'dir': b => { const P = curP(); P.dir = b.dataset.v; clearVariants(); recomputeNow(); centerTarget(UI.target, true); syncPatternUI(); invalidate({ fast: true }); },
+  'pat-target': b => { UI.target = b.dataset.key; UI.variants = null; renderPatTab(); renderCtxbar(); renderStatus(); draw(); },
+  'pat': b => { const P = curP(); setPatternType(P, b.dataset.pat); clearVariants(); recomputeNow(); centerTarget(UI.target, true); renderPatTab(); renderCtxbar(); invalidate({ fast: true }); },
+  'dir': b => { const P = curP(); P.dir = b.dataset.v; P.flipU = false; clearVariants(); recomputeNow(); centerTarget(UI.target, true); syncPatternUI(); renderCtxbar(); invalidate({ fast: true }); },
   'center': () => { recomputeNow(); centerTarget(UI.target, false); clearVariants(); invalidate({ fast: true }); },
   'corner0': () => { const P = curP(); P.offA = 0; P.offB = 0; syncPatInputs(); clearVariants(); invalidate({ fast: true }); },
   'optimize': () => optimize(),
   'variant': b => { const v = UI.variants && UI.variants.list[+b.dataset.i]; if (!v) return; const P = curP(); P.offA = v.offA; P.offB = v.offB; UI.variants.cur = +b.dataset.i; syncPatInputs(); renderVariants(); invalidate({ fast: true }); },
   'flipV': () => { const P = curP(); P.flipV = !P.flipV; clearVariants(); invalidate({ fast: true }); },
-  'flipU': () => { const P = curP(); P.flipU = !P.flipU; clearVariants(); invalidate({ fast: true }); },
+  'flipU': () => { const P = curP(), c = dirCtx(UI.target), th = fullAngle(P); P.flipU = !P.flipU; if (c) setDirection(P, th + 180, c); clearVariants(); syncPatInputs(); renderCtxbar(); invalidate({ fast: true }); },
   'shuffle': () => { const P = curP(); P.seed = (num(P.seed, 1) | 0) + 1; invalidate({ fast: true }); },
   'border-toggle': () => { const r = curRoom(); r.border.on = !r.border.on; if (r.border.on) UI.target = 'border:' + r.id; afterRooms(r.border.on ? 'Рамка включена. Ниже выберите рисунок рамки, центр настраивается отдельно.' : 'Рамка выключена.'); },
   'border-type': b => { const r = curRoom(); r.border.pat.type = b.dataset.v; renderComposite(); invalidate({ fast: true }); },
@@ -787,7 +990,7 @@ function addRoom(walls, name) {
   const [x, y] = placeNewRoom(), r = newRoom(name, walls, x, y); S.rooms.push(r); UI.room = r.id; UI.addRoom = false;
   view.fitted = false; afterRooms('Комната «' + name + '» добавлена справа. Подвиньте её к соседней в режиме «Комнаты» и добавьте проём.'); recomputeNow(); fitView(); draw();
 }
-function afterRooms(msg) { recomputeNow(); renderPlanTab(); if (UI.tab === 'pat') renderPatTab(); if (UI.tab === 'mat') renderMatTab(); invalidate({ fast: true }); if (msg) say(msg); }
+function afterRooms(msg) { recomputeNow(); renderPlanTab(); renderCtxbar(); if (UI.tab === 'pat') renderPatTab(); if (UI.tab === 'mat') renderMatTab(); invalidate({ fast: true }); if (msg) say(msg); }
 
 /* ================= 2. Покрытие ================= */
 function allItems(cat) { return cat.id === 'custom' ? Store.mats.map(m => Object.assign({}, m, { id: 'c:' + m.id })) : cat.items.map((it, i) => Object.assign({}, it, { id: cat.id + ':' + i })); }
@@ -1262,7 +1465,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#modal
 /* ================= верх, режимы, разделитель ================= */
 $('#btnProjects').addEventListener('click', openProjects);
 $('#btnSave').addEventListener('click', () => saveProject(false));
-$$('[data-mode]').forEach(b => b.addEventListener('click', () => { UI.mode = b.dataset.mode; syncToolbar(); modeHint(); draw(); saveUI(); }));
+$$('[data-mode]').forEach(b => b.addEventListener('click', () => { UI.mode = b.dataset.mode; UI.addTpl = null; UI.addPrev = null; UI.delArm = null; syncToolbar(); modeHint(); draw(); saveUI(); }));
 $('#btnFit').addEventListener('click', () => { fitView(); draw(); });
 $('#btnLabels').addEventListener('click', () => { UI.labels = !UI.labels; syncToolbar(); draw(); saveUI(); });
 $('#btnStyle').addEventListener('click', () => { UI.style = UI.style === 'scheme' ? 'wood' : 'scheme'; syncToolbar(); draw(); saveUI(); });
@@ -1270,7 +1473,7 @@ $('#btnImage').addEventListener('click', exportImage);
 function syncToolbar() {
   $$('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === UI.mode)));
   $('#btnLabels').setAttribute('aria-pressed', String(UI.labels)); $('#btnStyle').setAttribute('aria-pressed', String(UI.style === 'scheme'));
-  cv.className = 'm-' + UI.mode; $('#nudge').hidden = UI.mode !== 'pattern'; syncStep();
+  cv.className = 'm-' + UI.mode; $('#nudge').hidden = UI.mode !== 'pattern'; syncStep(); renderCtxbar();
   if (UI.mode === 'pattern') $('#nudgeTarget').textContent = unitName(UI.target).toLowerCase();
 }
 const work = $('#work'), mapcol = $('#mapcol'), splitter = $('#splitter');
@@ -1309,4 +1512,5 @@ function start() {
   try { if ('serviceWorker' in navigator && location.protocol === 'https:' && window.top === window.self && !window.claude) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) { /* без офлайна */ }
 }
 start();
+if (/[?&]debug=1/.test(location.search)) window.__rd = { gizmo: () => { const g = gizmo(); return g && { tx: g.tx, ty: g.ty, cx: g.cx, cy: g.cy }; }, rotHandle: () => rotHandle(UI.room), state: () => JSON.parse(JSON.stringify(S)), ui: () => ({ room: UI.room, target: UI.target, mode: UI.mode }), w2s: (x, y) => w2s(x, y) };
 })();

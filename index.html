@@ -87,6 +87,13 @@ button,input,select,textarea{font:inherit;color:inherit}
 .mapbar{flex:none;display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none}
 .mapbar::-webkit-scrollbar{display:none}
 .mapbar-r{display:flex;gap:2px;margin-left:auto;flex:none}
+.ctxbar{flex:none;display:flex;align-items:center;gap:6px;padding:6px 8px;background:var(--panel-2);border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none;min-height:46px;box-sizing:border-box}
+.ctxbar::-webkit-scrollbar{display:none}
+.ctxbar > *{flex:none}
+.ctx-t{font-size:12.5px;color:var(--muted);white-space:nowrap}
+.ctx-t b{color:var(--ink)}
+.ctxbar .inp.ang{width:84px;background:var(--panel)}
+.ctxbar .seg button{padding:6px 10px;white-space:nowrap;flex:none}
 .stage{position:relative;flex:1;min-height:0}
 #plan{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab}
 #plan.m-pattern{cursor:move}
@@ -344,6 +351,7 @@ textarea.code{width:100%;min-height:160px;box-sizing:border-box;font:12px/1.4 va
           <button class="tbtn" id="btnImage" type="button" title="Сохранить план картинкой"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-8 8"/></svg><span class="t-opt">Картинка</span></button>
         </div>
       </div>
+      <div class="ctxbar" id="ctxbar" role="toolbar" aria-label="Действия на карте" hidden></div>
       <div class="stage" id="stage"><canvas id="plan" aria-label="Карта раскладки"></canvas></div>
       <div class="mapfoot">
         <div class="nudge" id="nudge" hidden>
@@ -377,9 +385,9 @@ textarea.code{width:100%;min-height:160px;box-sizing:border-box;font:12px/1.4 va
         <div class="sec help" id="helpBox">
           <h3>Как пользоваться<button class="icon" type="button" data-act="help-close" aria-label="Скрыть подсказку"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg></button></h3>
           <ol>
-            <li>Начертите комнаты по стенам. Несколько комнат поставьте рядом — получится этаж, рисунок пойдёт через проёмы.</li>
+            <li>Начертите комнаты по стенам или прямо на карте: режим «Комнаты» → «+ Комната». Там же комнаты двигаются и поворачиваются. Несколько комнат рядом — этаж, рисунок идёт через проёмы.</li>
             <li>Выберите покрытие и размер планки.</li>
-            <li>Выберите рисунок и подвиньте его на карте, пока подрезки у стен не станут удобными.</li>
+            <li>Выберите рисунок. В режиме «Рисунок» двигайте его пальцем и поворачивайте за стрелку, пока подрезки у стен не станут удобными.</li>
             <li>Во вкладке «Расчёт» — с чего начать, какие подрезки пилить и сколько покупать.</li>
           </ol>
         </div>
