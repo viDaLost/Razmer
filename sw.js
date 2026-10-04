@@ -1,6 +1,6 @@
 /* Офлайн-режим: приложение открывается без интернета на объекте.
    Свои файлы — сначала из сети (всегда свежая версия), без сети — из кеша. Шрифты и библиотека Telegram — из кеша. */
-const CACHE = 'raskladka-v3';
+const CACHE = 'raskladka-v4';
 const SHELL = ['./', 'index.html', 'js/platform.js', 'js/engine.js', 'js/app.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', e => {

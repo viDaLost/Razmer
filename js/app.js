@@ -5,7 +5,7 @@ const E = window.RazmerEngine;
 const PF = window.RazmerPlatform || { inTG: false, tg: null, ios: false, android: false, standalone: false, ready: Promise.resolve(null), haptic() {}, version() { return false; } };
 const { DEG, clamp, mod, num, mm, f1, fm2, dist, plural, hash01, area, perim, inPoly, segDist, bboxOf, centroid, centroidMany, onLine,
   CATS, catById, TONES, PATTERNS, patDef, BORDER_PATTERNS, TEMPLATES, rectWalls, defaultPat, newRoom, newId, defaultState, migrateState,
-  roomGeom, wallsFromCorners, innerAngles, unitV, inwardOf, arcRadius, arcLength, sagittaFromRadius, computeGeo, unitKeys, buildUnit, computeUnit,
+  roomGeom, wallsFromCorners, innerAngles, unitV, inwardOf, arcRadius, arcLength, sagittaFromRadius, computeGeo, adjacency, unitKeys, buildUnit, computeUnit,
   plankPts, plankOutline, mainPart, cutSpec, genBond, genHerring, genChevron, genBasket, planRemnant, randShifts, clipBy } = E;
 
 /* ================= helpers ================= */
@@ -23,11 +23,19 @@ const ICON = {
   split: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h16M12 7v10"/></svg>',
   del: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>',
+  back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 5l-7 7 7 7"/></svg>',
+  rot: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12a8 8 0 11-2.3-5.7"/><path d="M20 4v5h-5"/></svg>',
+  copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="1"/><path d="M16 8V4H4v12h4"/></svg>',
+  img: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-8 8"/></svg>',
+  share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M6 11H5v10h14V11h-1"/></svg>',
+  star: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4 6.7 19.4l1.2-6L3.4 9.3l6-.7z"/></svg>',
 };
 
 const KEY_DRAFT = 'raskladka.draft.v1', KEY_PROJ = 'raskladka.projects.v1', KEY_MATS = 'raskladka.mats.v1', KEY_UI = 'raskladka.ui.v2';
 let S = defaultState();
-const UI = { tab: 'plan', mode: 'view', style: 'wood', labels: true, room: 'r1', target: 'floor', matTarget: 'main', catView: 'eng', addTpl: null, addPrev: null, sel: null, hl: null, step: 10, variants: null, help: true, mapH: null, addRoom: false, delArm: null, wallFocus: -1 };
+const UI = { tab: 'plan', mode: 'rooms', style: 'wood', labels: true, room: 'r1', target: 'floor', matTarget: 'main', catView: 'eng', addTpl: null, addPrev: null, sel: null, hl: null, step: 10, variants: null, helpSeen: false, mapH: null, addRoom: false, delArm: null, wallFocus: -1, wall: null, open: {}, lastDoor: null };
+/* шаг определяет, что делает палец на карте */
+const MODE_OF = { plan: 'rooms', mat: 'view', pat: 'pattern', res: 'view' };
 let MODEL = null;
 
 /* ================= расчёт ================= */
@@ -43,7 +51,7 @@ function computeAll() {
     const m = mats.get(M.key) || { M, boards: 0, full: 0, cut: 0, area: 0, names: [] };
     m.boards += r.stats.boards; m.full += r.stats.nFull; m.cut += r.stats.nCut; m.area += r.stats.layA; m.names.push(r.unit.name); mats.set(M.key, m);
   }
-  return { geo, units, byKey, mats: [...mats.values()] };
+  return { geo, units, byKey, mats: [...mats.values()], adj: adjacency(S, geo) };
 }
 function woodRGB(tone, idx, kind) {
   const base = (TONES[tone] || TONES.oak).c, h = hash01(idx * 2654435761 + 7);
@@ -118,16 +126,18 @@ function wallStats(res, geo) {
   const u = res.unit, sets = [];
   for (const rid of u.roomIds) {
     const G = geo[rid]; if (!G || G.err) continue;
-    if (u.kind === 'border') sets.push({ rid, poly: G.lay, g: G.g, label: 'стена' });
-    else if (u.kind === 'floor' || u.kind === 'room') sets.push({ rid, poly: G.center, g: G.g, label: G.inner ? 'рамка у стены' : 'стена' });
+    if (u.kind === 'border') sets.push({ rid, G, poly: G.lay, idx: G.g.wIdx, g: G.g, label: 'стена' });
+    else if (u.kind === 'floor' || u.kind === 'room') sets.push({ rid, G, poly: G.center, idx: G.cIdx, g: G.g, label: G.inner ? 'рамка у стены' : 'стена' });
   }
   const out = [];
   for (const set of sets) {
     const n = set.g.n, Lp = set.poly.length, walls = [];
     for (let i = 0; i < n; i++) {
-      const s = set.g.wIdx[i], e = i + 1 < n ? set.g.wIdx[i + 1] : Lp, segs = [];
+      const s = set.idx[i], e = i + 1 < n ? set.idx[i + 1] : Lp, segs = [], P = set.g.corners[i], Q = set.g.corners[(i + 1) % n];
       for (let k = s; k < e; k++) segs.push([set.poly[k % Lp], set.poly[(k + 1) % Lp]]);
-      walls.push({ rid: set.rid, i, label: set.label, segs, count: 0, minD: Infinity, maxD: 0, minT: Infinity, len: dist(set.g.corners[i], set.g.corners[(i + 1) % n]), arc: Math.abs(set.g.arcs[i]) >= 0.5 });
+      // участки стены, занятые проёмами: там планка не упирается в стену, а идёт дальше
+      const doors = set.G.doors.filter(d => d.wall === i).map(d => [d.t0 - 1, d.t1 + 1]);
+      walls.push({ rid: set.rid, i, label: set.label, segs, doors, P, u: unitV(P, Q), count: 0, minD: Infinity, maxD: 0, minT: Infinity, len: dist(P, Q), arc: Math.abs(set.g.arcs[i]) >= 0.5 });
     }
     for (const p of res.pieces) {
       if (p.full) continue;
@@ -140,6 +150,7 @@ function wallStats(res, geo) {
             const a = part[k], b = part[(k + 1) % m]; if (dist(a, b) < 0.5) continue;
             let fac = false; for (let j = 0; j < 4; j++) if (onLine(a, b, outl[j], outl[(j + 1) % 4], 0.6)) { fac = true; break; }
             if (fac) continue;
+            if (w.doors.length) { const ta = (a[0] - w.P[0]) * w.u[0] + (a[1] - w.P[1]) * w.u[1], tb = (b[0] - w.P[0]) * w.u[0] + (b[1] - w.P[1]) * w.u[1]; if (w.doors.some(d => Math.min(ta, tb) >= d[0] && Math.max(ta, tb) <= d[1])) continue; }
             for (const [s0, s1] of w.segs) {
               if (!onLine(a, b, s0, s1, 0.6)) continue;
               const dx = s1[0] - s0[0], dy = s1[1] - s0[1], l = Math.hypot(dx, dy) || 1;
@@ -209,7 +220,7 @@ function render(ctx, W, H, vw, opt) {
   for (let y = y0; Y(y) < H; y += st) { const py = Math.round(Y(y)) + 0.5; ctx.moveTo(0, py); ctx.lineTo(W, py); }
   ctx.stroke();
   if (!MODEL) return;
-  const geo = MODEL.geo, sch = opt.style === 'scheme', live = opt.live;
+  const geo = MODEL.geo, sch = opt.style === 'scheme', live = opt.live, mode = live ? UI.mode : 'view';
   ctx.save(); ctx.transform(s, 0, 0, s, tx, ty);
   for (const r of S.rooms) { const G = geo[r.id]; if (G && G.g && !G.err) { ctx.fillStyle = COL.gap; ctx.fill(pathOf(G.g.poly)); } }
   for (const res of MODEL.units) {
@@ -227,28 +238,52 @@ function render(ctx, W, H, vw, opt) {
   ctx.lineWidth = 1.2 / s; ctx.strokeStyle = COL.wall; ctx.setLineDash([6 / s, 4 / s]);
   for (const r of S.rooms) { const G = geo[r.id]; if (!G || G.err) continue; if (G.inner) ctx.stroke(pathOf(G.inner)); for (const x of G.inserts) ctx.stroke(pathOf(x.rect)); }
   ctx.setLineDash([]);
-  // стены с проёмами
+  // ниши без пола (под шкаф) и не построенные — штриховка
+  for (const r of S.rooms) {
+    const G = geo[r.id]; if (!G || !G.g || !G.g.niches) continue;
+    for (const nc of G.g.niches) {
+      if (nc.floor && !nc.off) continue;
+      const path = pathOf(nc.pts); ctx.save(); ctx.clip(path);
+      ctx.fillStyle = nc.off ? COL.badSoft : COL.panel; ctx.fill(path);
+      ctx.strokeStyle = nc.off ? COL.bad : COL.muted; ctx.lineWidth = 1 / s; ctx.beginPath();
+      const b = bboxOf(nc.pts), step = 9 / s; for (let v = b.u0 - (b.v1 - b.v0); v < b.u1; v += step) { ctx.moveTo(v, b.v0); ctx.lineTo(v + (b.v1 - b.v0), b.v1); }
+      ctx.stroke(); ctx.restore();
+    }
+  }
+  // стены: проёмы — разрывы, ниши без пола — пунктир по краю пола
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   for (const r of S.rooms) {
     const G = geo[r.id]; if (!G || !G.g) continue;
-    const sel = r.id === UI.room && S.rooms.length > 1;
+    const sel = r.id === UI.room && S.rooms.length > 1 && mode === 'rooms';
     ctx.strokeStyle = G.err ? COL.bad : COL.wall; ctx.lineWidth = (sel ? 4 : 3.2) / s;
     if (G.err) ctx.setLineDash([8 / s, 6 / s]);
-    const g = G.g, Lp = g.poly.length;
+    const g = G.g, Lp = g.poly.length, T = Math.max(0, num(S.set.wallT, 120));
     for (let i = 0; i < g.n; i++) {
       const sIdx = g.wIdx[i], eIdx = i + 1 < g.n ? g.wIdx[i + 1] : Lp, pts = [];
       for (let kk = sIdx; kk <= eIdx; kk++) pts.push(g.poly[kk % Lp]);
-      const doors = G.doors.filter(d => d.wall === i);
-      if (!doors.length) { ctx.beginPath(); pts.forEach((q, j) => j ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.stroke(); continue; }
-      const P = g.corners[i], c = dist(P, g.corners[(i + 1) % g.n]), u = doors[0].u;
-      const cuts = doors.map(d => [d.t0, d.t1]).sort((a, b) => a[0] - b[0]); let t = 0;
+      const P = g.corners[i], Q = g.corners[(i + 1) % g.n], u = unitV(P, Q), c = dist(P, Q);
+      const doors = G.doors.filter(d => d.wall === i), open = (g.niches || []).filter(x => x.wall === i && (!x.floor || x.off));
+      const cuts = doors.map(d => [d.t0, d.t1]).concat(open.map(x => [x.t0, x.t1]), neighborDoorCuts(r.id, i, P, u)).sort((a, b) => a[0] - b[0]);
+      const tOf = q => (q[0] - P[0]) * u[0] + (q[1] - P[1]) * u[1], offL = q => Math.abs((q[0] - P[0]) * u[1] - (q[1] - P[1]) * u[0]);
       ctx.beginPath();
-      for (const [a, b] of cuts) { if (a > t) { ctx.moveTo(P[0] + u[0] * t, P[1] + u[1] * t); ctx.lineTo(P[0] + u[0] * a, P[1] + u[1] * a); } t = Math.max(t, b); }
-      if (t < c) { ctx.moveTo(P[0] + u[0] * t, P[1] + u[1] * t); ctx.lineTo(P[0] + u[0] * c, P[1] + u[1] * c); }
+      for (let j = 0; j + 1 < pts.length; j++) {
+        const a = pts[j], b = pts[j + 1];
+        if (!cuts.length || Math.abs(g.arcs[i]) >= 0.5 || offL(a) > 0.5 || offL(b) > 0.5) { ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); continue; }
+        let ta = tOf(a), tb = tOf(b); const fwd = tb >= ta; if (!fwd) [ta, tb] = [tb, ta];
+        let t = ta;
+        for (const [c0, c1] of cuts) { if (c1 <= t || c0 >= tb) continue; if (c0 > t) { ctx.moveTo(P[0] + u[0] * t, P[1] + u[1] * t); ctx.lineTo(P[0] + u[0] * c0, P[1] + u[1] * c0); } t = Math.max(t, c1); }
+        if (t < tb) { ctx.moveTo(P[0] + u[0] * t, P[1] + u[1] * t); ctx.lineTo(P[0] + u[0] * tb, P[1] + u[1] * tb); }
+      }
       ctx.stroke();
-      ctx.save(); ctx.lineWidth = 1.5 / s; const T = Math.max(0, num(S.set.wallT, 120));
-      for (const d of doors) for (const tt of [d.t0, d.t1]) { const B = [P[0] + u[0] * tt, P[1] + u[1] * tt]; ctx.beginPath(); ctx.moveTo(B[0], B[1]); ctx.lineTo(B[0] + d.n[0] * T, B[1] + d.n[1] * T); ctx.stroke(); }
-      ctx.restore();
+      if (doors.length) {
+        ctx.save(); ctx.lineWidth = 1.5 / s;
+        for (const d of doors) for (const tt of [d.t0, d.t1]) { const B = [P[0] + u[0] * tt, P[1] + u[1] * tt]; ctx.beginPath(); ctx.moveTo(B[0], B[1]); ctx.lineTo(B[0] + d.n[0] * T, B[1] + d.n[1] * T); ctx.stroke(); }
+        ctx.restore();
+      }
+      for (const x of open) {
+        ctx.beginPath(); ctx.moveTo(x.pts[0][0], x.pts[0][1]); for (const q of x.pts.slice(1)) ctx.lineTo(q[0], q[1]); ctx.stroke();
+        ctx.save(); ctx.lineWidth = 1.4 / s; ctx.setLineDash([5 / s, 4 / s]); ctx.beginPath(); ctx.moveTo(x.pts[0][0], x.pts[0][1]); ctx.lineTo(x.pts[3][0], x.pts[3][1]); ctx.stroke(); ctx.restore();
+      }
     }
     ctx.setLineDash([]);
   }
@@ -272,7 +307,7 @@ function render(ctx, W, H, vw, opt) {
     }
   }
   // направляющие выбранного участка
-  const tres = MODEL.byKey[UI.target];
+  const tres = mode === 'rooms' ? null : MODEL.byKey[UI.target];
   if (tres && !tres.err && tres.guides && tres.guides.length) {
     const F = tres.unit.parts[0].frame, big = 1e5;
     ctx.save(); ctx.setTransform(k, 0, 0, k, 0, 0); ctx.transform(s, 0, 0, s, tx, ty); ctx.clip(tres.clip);
@@ -296,30 +331,73 @@ function render(ctx, W, H, vw, opt) {
     arrowHead(ctx, px + du[0] * L, py + du[1] * L, du); ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.fill();
     pillText(ctx, 'СТАРТ', px + du[0] * 10 + dv[0] * 20, py + du[1] * 10 + dv[1] * 20, COL.chalk, COL.onChalk, 'left');
   }
-  // подписи стен выбранной комнаты
+  // названия комнат на шаге «Комнаты» (под подписями стен); у выбранной — под значком переноса, если комната крупная
+  if (live && mode === 'rooms') {
+    for (const r of S.rooms) {
+      const G = geo[r.id]; if (!G || !G.g) continue; const c = centroid(G.g.poly), bb = bboxOf(G.g.poly), sel = r.id === UI.room;
+      if (sel && (bb.v1 - bb.v0) * s < 110) continue;
+      // подпись должна помещаться в комнату: иначе без площади, а если и так не влезает — не пишем
+      ctx.font = '600 11px ' + COL.body; const room_w = (bb.u1 - bb.u0) * s * 0.92;
+      let txt = r.name + (G.err ? ' — ошибка' : ' · ' + fm2(Math.abs(area(G.g.poly))) + ' м²');
+      if (ctx.measureText(txt).width + 14 > room_w) txt = r.name;
+      if (ctx.measureText(txt).width + 14 > room_w) continue;
+      pillText(ctx, txt, X(c[0]), Y(c[1]) + (sel ? 30 : 0), sel ? COL.chalk : COL.ink, sel ? COL.onChalk : COL.panel, 'center');
+    }
+  }
+  // подписи стен выбранной комнаты; у стены, к которой приставлена комната, размеры делятся по стыку
   const R = curRoom(), RG = R && geo[R.id];
   if (RG && RG.g && opt.labels !== false) {
-    const g = RG.g, sgn = g.sgn;
+    const g = RG.g, sgn = g.sgn, joints = (MODEL.adj || []).filter(a => a.a === R.id);
     ctx.font = '600 11px ' + COL.mono; ctx.textBaseline = 'middle';
     for (let i = 0; i < g.n; i++) {
       const P = g.corners[i], Q = g.corners[(i + 1) % g.n], c = dist(P, Q); if (c * s < 30) continue;
-      const u = unitV(P, Q), n = sgn > 0 ? [u[1], -u[0]] : [-u[1], u[0]];
+      const u = unitV(P, Q), n = sgn > 0 ? [u[1], -u[0]] : [-u[1], u[0]], isArc = Math.abs(g.arcs[i]) >= 0.5;
       let M = [(P[0] + Q[0]) / 2, (P[1] + Q[1]) / 2];
-      if (Math.abs(g.arcs[i]) >= 0.5) M = [M[0] + n[0] * g.arcs[i], M[1] + n[1] * g.arcs[i]];
+      if (isArc) M = [M[0] + n[0] * g.arcs[i], M[1] + n[1] * g.arcs[i]];
       const mx = X(M[0]) + n[0] * 17, my = Y(M[1]) + n[1] * 17;
-      const txt = (Math.abs(g.arcs[i]) >= 0.5 ? '⌒ ' : '') + mm(c), tw = ctx.measureText(txt).width;
-      const auto = g.autoClosed && i === g.n - 1;
-      ctx.fillStyle = auto ? COL.muted : COL.chalk; ctx.beginPath(); ctx.arc(mx - tw / 2 - 11, my, 9, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = COL.onChalk; ctx.textAlign = 'center'; ctx.fillText(String(i + 1), mx - tw / 2 - 11, my + 0.5);
+      const txt = (isArc ? '⌒ ' : '') + mm(c), tw = ctx.measureText(txt).width;
+      const auto = g.autoClosed && i === g.n - 1, selW = live && UI.wall && UI.wall.rid === R.id && UI.wall.i === i;
+      ctx.fillStyle = auto ? COL.muted : selW ? COL.tape : COL.chalk; ctx.beginPath(); ctx.arc(mx - tw / 2 - 11, my, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = selW ? '#3b2a00' : COL.onChalk; ctx.textAlign = 'center'; ctx.fillText(String(i + 1), mx - tw / 2 - 11, my + 0.5);
       ctx.textAlign = 'left'; ctx.lineWidth = 3; ctx.strokeStyle = COL.canvas; ctx.strokeText(txt, mx - tw / 2, my + 0.5); ctx.fillStyle = COL.ink; ctx.fillText(txt, mx - tw / 2, my + 0.5);
+      // стыки с соседними комнатами: засечки и длины частей стены внутри комнаты
+      const js = isArc ? [] : joints.filter(a => a.i === i);
+      if (!js.length) continue;
+      const bps = [0, c]; for (const a of js) bps.push(a.o0, a.o1);
+      bps.sort((a, b) => a - b); const br = []; for (const b of bps) if (!br.length || b - br[br.length - 1] > 5) br.push(b); else br[br.length - 1] = Math.max(br[br.length - 1], b);
+      if (br.length < 3) continue;
+      const inn = [-n[0], -n[1]];
+      ctx.strokeStyle = COL.chalk; ctx.lineWidth = 2;
+      for (const b of br.slice(1, -1)) { const q = [P[0] + u[0] * b, P[1] + u[1] * b], sx = X(q[0]), sy = Y(q[1]); ctx.beginPath(); ctx.moveTo(sx - inn[0] * 6, sy - inn[1] * 6); ctx.lineTo(sx + inn[0] * 22, sy + inn[1] * 22); ctx.stroke(); }
+      for (let j = 0; j + 1 < br.length; j++) {
+        const a = br[j], b = br[j + 1], len = b - a; if (len * s < 34) continue;
+        const shared = js.some(x => a >= x.o0 - 3 && b <= x.o1 + 3), q = [P[0] + u[0] * (a + b) / 2, P[1] + u[1] * (a + b) / 2];
+        const t2 = mm(len), sx = X(q[0]) + inn[0] * 14, sy = Y(q[1]) + inn[1] * 14;
+        ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.strokeText(t2, sx, sy + 0.5);
+        ctx.fillStyle = shared ? '#1557b0' : '#17212b'; ctx.fillText(t2, sx, sy + 0.5); // поверх планок — тёмным в любой теме
+      }
+    }
+    // ниши и выступы выбранной комнаты
+    if (mode === 'rooms') for (const nc of g.niches || []) {
+      const c0 = nc.pts[1], c1 = nc.pts[2], q = [(c0[0] + c1[0]) / 2, (c0[1] + c1[1]) / 2], wpx = (nc.t1 - nc.t0) * s;
+      if (wpx < 40) continue;
+      const txt = (nc.kind === 'box' ? 'выступ ' : nc.floor ? 'ниша ' : 'без пола ') + mm(nc.t1 - nc.t0) + '×' + mm(nc.d), out = nc.kind === 'box' ? -1 : 1;
+      ctx.font = '600 10.5px ' + COL.mono; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.9)';
+      const sx = X(q[0]) - nc.no[0] * out * 12, sy = Y(q[1]) - nc.no[1] * out * 12; ctx.strokeText(txt, sx, sy); ctx.fillStyle = nc.off ? '#a32616' : '#5a4400'; ctx.fillText(txt, sx, sy);
     }
   }
-  // названия комнат в режимах «Стены» и «Комнаты»
-  if (live && (UI.mode === 'rooms' || UI.mode === 'walls')) {
-    for (const r of S.rooms) { const G = geo[r.id]; if (!G || !G.g) continue; const c = centroid(G.g.poly), off = UI.mode === 'rooms' && r.id === UI.room ? 30 : 0; pillText(ctx, r.name + (G.err ? ' — ошибка' : ' · ' + fm2(Math.abs(area(G.g.poly))) + ' м²'), X(c[0]), Y(c[1]) + off, r.id === UI.room ? COL.chalk : COL.ink, r.id === UI.room ? COL.onChalk : COL.panel, 'center'); }
-  }
-  // режим «Комнаты»: перемещение, поворот, новая комната
-  if (live && UI.mode === 'rooms') {
+  // шаг «Комнаты»: выбранная стена, углы, перенос, поворот, новая комната
+  if (live && mode === 'rooms') {
+    if (RG && RG.g && UI.wall && UI.wall.rid === R.id && UI.wall.i < RG.g.n) {
+      const g = RG.g, i = UI.wall.i, Lp = g.poly.length, a = g.wIdx[i], b = i + 1 < g.n ? g.wIdx[i + 1] : Lp;
+      ctx.save(); ctx.strokeStyle = COL.tape; ctx.globalAlpha = 0.7; ctx.lineWidth = 10; ctx.lineCap = 'round'; ctx.beginPath();
+      for (let kk = a; kk <= b; kk++) { const q = g.poly[kk % Lp]; kk === a ? ctx.moveTo(X(q[0]), Y(q[1])) : ctx.lineTo(X(q[0]), Y(q[1])); }
+      ctx.stroke(); ctx.restore();
+      const h = midHandle(g, i), hx = X(h[0]), hy = Y(h[1]);
+      ctx.beginPath(); ctx.moveTo(hx, hy - 9); ctx.lineTo(hx + 9, hy); ctx.lineTo(hx, hy + 9); ctx.lineTo(hx - 9, hy); ctx.closePath();
+      ctx.fillStyle = COL.panel; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = COL.tape; ctx.stroke();
+    }
+    if (RG && RG.g && !UI.addTpl) for (const q of RG.g.corners) { ctx.beginPath(); ctx.arc(X(q[0]), Y(q[1]), 7, 0, Math.PI * 2); ctx.fillStyle = COL.panel; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = COL.chalk; ctx.stroke(); }
     const h = !UI.addTpl && R && rotHandle(R.id);
     if (h) {
       ctx.strokeStyle = COL.chalk; ctx.lineWidth = 2; ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.moveTo(h.tx, h.ty); ctx.lineTo(h.sx, h.sy + 13); ctx.stroke(); ctx.setLineDash([]);
@@ -339,7 +417,7 @@ function render(ctx, W, H, vw, opt) {
       } else { const q = w2s(b[0], b[1]); ctx.beginPath(); ctx.arc(q[0], q[1], 9, 0, Math.PI * 2); ctx.fillStyle = COL.chalk; ctx.fill(); }
     }
   }
-  // режим «Рисунок»: опорная стена и стрелка направления
+  // шаг «Рисунок»: опорная стена и стрелка направления
   const gz = live ? gizmo() : null;
   if (gz) {
     const rw = refWallOf(gz.u);
@@ -365,21 +443,20 @@ function render(ctx, W, H, vw, opt) {
     pillText(ctx, f1(shownAngle(P)) + '°', cx + Math.cos(mid + (Math.abs(da) < 0.3 ? Math.PI : 0)) * L * 0.7, cy + Math.sin(mid + (Math.abs(da) < 0.3 ? Math.PI : 0)) * L * 0.7, COL.tape, '#3b2a00', 'center');
     ctx.restore();
   }
-  // ручки
-  if (live && UI.mode === 'walls' && RG && RG.g) {
-    const g = RG.g;
-    for (let i = 0; i < g.n; i++) {
-      const h = midHandle(g, i), hx = X(h[0]), hy = Y(h[1]);
-      ctx.beginPath(); ctx.moveTo(hx, hy - 7); ctx.lineTo(hx + 7, hy); ctx.lineTo(hx, hy + 7); ctx.lineTo(hx - 7, hy); ctx.closePath();
-      ctx.fillStyle = COL.panel; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = COL.tape; ctx.stroke();
-    }
-    for (const q of g.corners) { ctx.beginPath(); ctx.arc(X(q[0]), Y(q[1]), 8, 0, Math.PI * 2); ctx.fillStyle = COL.panel; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = COL.chalk; ctx.stroke(); }
-  }
   // линейка
   const want = 90 / s, nice = [100, 200, 500, 1000, 2000, 5000, 10000].find(v => v >= want * 0.6) || 10000, px = nice * s, bx = W - px - 14, by = H - 12;
   ctx.strokeStyle = COL.ink; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(bx, by - 5); ctx.lineTo(bx, by); ctx.lineTo(bx + px, by); ctx.lineTo(bx + px, by - 5); ctx.stroke();
   ctx.fillStyle = COL.ink; ctx.font = '600 11px ' + COL.mono; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
   ctx.fillText(nice >= 1000 ? (nice / 1000) + ' м' : nice + ' мм', bx + px / 2, by - 4);
+}
+/* проём соседней комнаты в общей стене: разрываем и нашу стену напротив него */
+function neighborDoorCuts(rid, i, P, u) {
+  const out = []; if (!MODEL || !MODEL.adj) return out;
+  for (const a of MODEL.adj) {
+    if (a.a !== rid || a.i !== i) continue; const G = MODEL.geo[a.b]; if (!G) continue;
+    for (const d of G.doors) { if (d.wall !== a.j) continue; const B1 = [d.P[0] + d.u[0] * d.t0, d.P[1] + d.u[1] * d.t0], B2 = [d.P[0] + d.u[0] * d.t1, d.P[1] + d.u[1] * d.t1], t1 = (B1[0] - P[0]) * u[0] + (B1[1] - P[1]) * u[1], t2 = (B2[0] - P[0]) * u[0] + (B2[1] - P[1]) * u[1]; out.push([Math.min(t1, t2), Math.max(t1, t2)]); }
+  }
+  return out;
 }
 function midHandle(g, i) { const P = g.corners[i], Q = g.corners[(i + 1) % g.n], u = unitV(P, Q), n = g.sgn > 0 ? [u[1], -u[0]] : [-u[1], u[0]], h = g.arcs[i] || 0; return [(P[0] + Q[0]) / 2 + n[0] * h, (P[1] + Q[1]) / 2 + n[1] * h]; }
 function arrowHead(ctx, x, y, d) { const a = Math.atan2(d[1], d[0]); ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * 8, y + Math.sin(a) * 8); ctx.lineTo(x + Math.cos(a + 2.5) * 8, y + Math.sin(a + 2.5) * 8); ctx.lineTo(x + Math.cos(a - 2.5) * 8, y + Math.sin(a - 2.5) * 8); ctx.closePath(); ctx.fill(); }
@@ -398,8 +475,9 @@ function resizeCanvas() {
 function floorBBox() { const pts = []; for (const r of S.rooms) { const G = MODEL && MODEL.geo[r.id]; const g = G && G.g ? G.g : roomGeom(r); pts.push(...g.poly); } return pts.length ? bboxOf(pts) : null; }
 function fitView() {
   const b = floorBBox(); if (!b) return;
-  const m = CW < 560 ? 48 : 56, w = Math.max(1, b.u1 - b.u0), h = Math.max(1, b.v1 - b.v0);
-  view.s = Math.min((CW - 2 * m) / w, (CH - 2 * m) / h); view.cx = (b.u0 + b.u1) / 2; view.cy = (b.v0 + b.v1) / 2; view.fitted = true;
+  // сверху запас под ручку поворота комнаты
+  const m = CW < 560 ? 44 : 56, top = 22, w = Math.max(1, b.u1 - b.u0), h = Math.max(1, b.v1 - b.v0);
+  view.s = Math.min((CW - 2 * m) / w, (CH - 2 * m - top) / h); view.cx = (b.u0 + b.u1) / 2; view.cy = (b.v0 + b.v1) / 2 - top / 2 / view.s; view.fitted = true;
 }
 let drawQueued = false;
 function draw() { if (drawQueued) return; drawQueued = true; requestAnimationFrame(() => { drawQueued = false; render(cv.getContext('2d'), CW, CH, view, { k: DPR, style: UI.style, labels: UI.labels, live: true }); }); }
@@ -413,7 +491,17 @@ function invalidate(opts) {
   clearTimeout(panelTimer); panelTimer = setTimeout(() => { refreshLight(); if (UI.tab === 'res') renderResults(); }, opts.fast ? 0 : 220);
   clearTimeout(saveTimer); saveTimer = setTimeout(() => lsSet(KEY_DRAFT, JSON.stringify(S)), 600);
 }
-function refreshLight() { renderRoomList(); renderRoomKV(); renderClosure(); renderWallHints(); }
+function refreshLight() { renderRoomList(); renderRoomKV(); renderClosure(); renderWallHints(); renderRoomSums(); renderSums(); }
+/* краткие итоги в заголовках свёрнутых разделов */
+function renderSums() {
+  const set = (id, t) => { const el = $('#' + id); if (el) el.textContent = t; };
+  const m = curMat(false); set('plankSum', mm(num(m.L)) + '×' + mm(num(m.W)) + (num(m.T) ? '×' + f1(num(m.T)) : '') + ' мм');
+  set('mountSum', 'зазор ' + mm(num(S.set.gap)) + ' мм · запас ' + f1(num(S.set.reserve)) + '%');
+  const P = curP(), kind = targetKind(UI.target);
+  set('dirSum', kind === 'ins' ? f1(shownAngle(P)) + '°' : 'стена ' + ((num(P.refWall) | 0) + 1) + ' · ' + f1(shownAngle(P)) + '°');
+  set('offSum', kind === 'border' ? mm(num(P.offA)) + ' мм' : mm(num(P.offB)) + ' / ' + mm(num(P.offA)) + ' мм');
+  set('rulesSum', 'узкая < ' + mm(num(P.minEdge, 25)) + ' мм');
+}
 
 /* ================= участки: что настраиваем ================= */
 function unitName(key) {
@@ -459,29 +547,33 @@ function matKeyName(key) { if (key === 'main') return 'Основное'; const 
 let msgTimer = 0;
 function say(text, kind, sticky) { const el = $('#msg'); el.textContent = text; el.className = 'msg' + (kind ? ' ' + kind : ''); clearTimeout(msgTimer); if (!sticky) msgTimer = setTimeout(modeHint, clamp(3000 + text.length * 50, 4000, 12000)); }
 const MODE_HINT = {
-  view: 'Нажмите на доску — покажу, как её пилить. Карту двигайте пальцем, масштаб — двумя.',
-  pattern: 'Тяните рисунок пальцем. Круглая ручка на стрелке поворачивает направление. Нажмите на стену — рисунок пойдёт вдоль неё.',
-  walls: 'Кружки — углы, ромбы — середины стен. Потяните ромб, и стена станет дугой.',
-  rooms: 'Тяните комнату пальцем — у соседней стены она прилипнет. Круглая ручка сверху — поворот. «+ Комната» — добавить на карту.',
+  rooms: 'Нажмите на комнату — выберу её, на стену — проём, ниша, дуга. Выбранную комнату тяните пальцем, круглая ручка — поворот.',
+  view: 'Нажмите на доску — покажу, как её пилить. Карту двигайте пальцем, масштаб — двумя пальцами.',
+  pattern: 'Тяните рисунок пальцем, карту — двумя пальцами. Ручка на стрелке поворачивает рисунок, касание стены — рисунок вдоль неё.',
 };
 function modeHint() { const el = $('#msg'); el.className = 'msg'; el.textContent = MODE_HINT[UI.mode] || ''; }
 function renderStatus() {
   const el = $('#status'); if (!MODEL) { el.innerHTML = ''; return; }
-  const errs = S.rooms.filter(r => MODEL.geo[r.id] && MODEL.geo[r.id].err);
-  const res = MODEL.byKey[UI.target], parts = [];
+  const errs = S.rooms.filter(r => MODEL.geo[r.id] && MODEL.geo[r.id].err), parts = [];
+  const res = MODEL.byKey[UI.target] || MODEL.units[0];
   if (errs.length) parts.push('<span class="pill bad">Ошибка: ' + esc(errs.map(r => r.name).join(', ')) + '</span>');
   const ov = overlaps(); if (ov) parts.push('<span class="pill bad">Наложились: ' + esc(ov) + '</span>');
+  if (UI.mode === 'rooms') {
+    let A = 0; for (const r of S.rooms) { const G = MODEL.geo[r.id]; if (G && G.g && !G.err) A += Math.abs(area(G.g.poly)); }
+    parts.push('<span class="pill">' + S.rooms.length + ' ' + plural(S.rooms.length, 'комната', 'комнаты', 'комнат') + ' · ' + fm2(A) + ' м²</span>');
+    const nd = S.rooms.reduce((t, r) => t + MODEL.geo[r.id].doors.length, 0); if (nd) parts.push('<span class="pill">' + nd + ' ' + plural(nd, 'проём', 'проёма', 'проёмов') + '</span>');
+  }
   if (res) {
-    parts.push('<span class="pill info">' + esc(res.unit.name) + '</span>');
+    if (UI.mode === 'pattern' && MODEL.units.length > 1) parts.push('<span class="pill info">' + esc(res.unit.name) + '</span>');
     if (res.err) parts.push('<span class="pill bad">' + esc(res.err) + '</span>');
-    else {
-      const s = res.stats;
-      parts.push('<span class="pill">Целых ' + s.nFull + '</span>', '<span class="pill warn">Подрезок ' + s.nCut + '</span>');
-      if (s.nCut) parts.push('<span class="pill ' + (s.nBad ? 'bad' : 'ok') + '">' + (s.nBad ? 'Узких ' + s.nBad + ' · мин. ' + mm(s.minT) + ' мм' : 'Мин. кусок ' + mm(s.minT) + ' мм') + '</span>');
-      parts.push('<span class="pill">Нужно ' + s.boards + ' шт</span>');
+    else if (UI.mode !== 'rooms' || !errs.length) {
+      const st = res.stats, tot = MODEL.mats.reduce((t, m) => t + m.boards, 0);
+      if (UI.mode !== 'rooms') parts.push('<span class="pill">Целых ' + st.nFull + '</span>', '<span class="pill warn">Подрезок ' + st.nCut + '</span>');
+      if (st.nCut && UI.mode !== 'rooms') parts.push('<span class="pill ' + (st.nBad ? 'bad' : 'ok') + '">' + (st.nBad ? 'Узких ' + st.nBad + ' · ' + mm(st.minT) + ' мм' : 'Мин. ' + mm(st.minT) + ' мм') + '</span>');
+      parts.push('<span class="pill">Нужно ' + tot + ' шт</span>');
     }
   }
-  el.innerHTML = parts.join('');
+  el.innerHTML = parts.join(''); fadeMore(el);
 }
 
 function overlaps() {
@@ -552,8 +644,10 @@ function roomAt(w) { for (let i = S.rooms.length - 1; i >= 0; i--) { const G = M
 function roomCenter(r) { const G = MODEL && MODEL.geo[r.id], g = G && G.g ? G.g : roomGeom(r); return centroid(g.poly); }
 function rotHandle(rid) {
   const G = MODEL && MODEL.geo[rid]; if (!G || !G.g) return null;
-  const b = bboxOf(G.g.poly), C = centroid(G.g.poly), top = w2s(C[0], b.v0), c = w2s(C[0], C[1]);
-  return { C, sx: top[0], sy: top[1] - 36, tx: top[0], ty: top[1], cx: c[0], cy: c[1] };
+  // ручка поворота над комнатой, правее середины — там, где не стоит подпись длины стены
+  const b = bboxOf(G.g.poly), C = centroid(G.g.poly), top = w2s(C[0], b.v0), c = w2s(C[0], C[1]), right = w2s(b.u1, b.v0)[0];
+  const x = Math.max(top[0], Math.min(right - 6, top[0] + 70));
+  return { C, sx: x, sy: top[1] - 36, tx: x, ty: top[1], cx: c[0], cy: c[1] };
 }
 function rotateRoomBy(r, deg) { const C = roomCenter(r), p = rot2([num(r.x0), num(r.y0)], C, deg * DEG); r.x0 = Math.round(p[0]); r.y0 = Math.round(p[1]); r.a0 = mod(num(r.a0) + deg, 360); }
 /* углы прилипают к 90°, 45° и 15° */
@@ -612,6 +706,40 @@ function wallAt(sx, sy, rids) {
   }
   return hit;
 }
+/* стена под пальцем (любая комната, дуги тоже); t — место касания вдоль стены */
+function wallHit(sx, sy) {
+  let best = 18, hit = null;
+  for (const r of S.rooms) {
+    const G = MODEL.geo[r.id]; if (!G || !G.g) continue; const g = G.g, Lp = g.poly.length;
+    for (let i = 0; i < g.n; i++) {
+      const a0 = g.wIdx[i], b0 = i + 1 < g.n ? g.wIdx[i + 1] : Lp;
+      for (let kk = a0; kk < b0; kk++) { const A = w2s(g.poly[kk % Lp][0], g.poly[kk % Lp][1]), B = w2s(g.poly[(kk + 1) % Lp][0], g.poly[(kk + 1) % Lp][1]), d = segDist(sx, sy, A, B) - (r.id === UI.room ? 3 : 0); if (d < best) { best = d; hit = { rid: r.id, i }; } }
+    }
+  }
+  if (hit) { const g = MODEL.geo[hit.rid].g, P = g.corners[hit.i], Q = g.corners[(hit.i + 1) % g.n], w = s2w(sx, sy), u = unitV(P, Q); hit.t = Math.round(clamp((w[0] - P[0]) * u[0] + (w[1] - P[1]) * u[1], 0, dist(P, Q))); }
+  return hit;
+}
+function wallText(r, i) {
+  const G = MODEL && MODEL.geo[r.id], g = G && G.g; if (!g || i >= g.n) return '';
+  const c = dist(g.corners[i], g.corners[(i + 1) % g.n]), js = (MODEL.adj || []).filter(a => a.a === r.id && a.i === i);
+  let t = 'Стена ' + (i + 1) + ' · ' + mm(c) + ' мм';
+  if (js.length) t += ': ' + jointSegs(c, js).map(sg => mm(sg.len) + (sg.to ? ' общая с «' + roomName(sg.to) + '»' : '')).join(' + ');
+  return t;
+}
+/* части стены между стыками с соседними комнатами */
+function jointSegs(c, js) {
+  const bps = [0, c]; for (const a of js) bps.push(a.o0, a.o1);
+  bps.sort((a, b) => a - b); const br = []; for (const b of bps) if (!br.length || b - br[br.length - 1] > 5) br.push(b); else br[br.length - 1] = Math.max(br[br.length - 1], b);
+  const out = []; for (let j = 0; j + 1 < br.length; j++) { const a = br[j], b = br[j + 1], x = js.find(q => a >= q.o0 - 3 && b <= q.o1 + 3); out.push({ a, b, len: b - a, to: x ? x.b : null }); }
+  return out;
+}
+function selectWall(wh) {
+  const r = room(wh.rid); if (!r) return;
+  UI.room = wh.rid; UI.wall = wh; UI.wallFocus = wh.i; UI.open.walls = true; UI.delArm = null; UI.addRoom = false;
+  renderPlanTab(); renderCtxbar(); draw(); saveUI(); PF.haptic('select');
+  const c = $('.wcard[data-wi="' + wh.i + '"]'); if (c && c.scrollIntoView) c.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  say(wallText(r, wh.i) + '. Под картой: проём, ниша, выступ, дуга. Ромб на стене выгибает её.');
+}
 function startGesture() {
   const pts = [...ptrs.values()];
   if (pts.length >= 2) { const a = pts[0], b = pts[1], mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2; gest = { type: 'pinch', d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, s0: view.s, w: s2w(mx, my), moved: true }; UI.addPrev = null; return; }
@@ -622,18 +750,20 @@ function startGesture() {
     if (gz && Math.hypot(p.x - gz.tx, p.y - gz.ty) < 26) { Object.assign(gest, { type: 'prot', c: dirCtx(UI.target), P: curP() }); return; }
     const res = MODEL && MODEL.byKey[UI.target];
     if (res && !res.err) { const P = curP(), F = res.unit.parts[0].frame; Object.assign(gest, { type: 'pattern', P, F, offA: num(P.offA), offB: num(P.offB), kind: res.unit.kind }); }
-  } else if (UI.mode === 'walls' && RG && RG.g) {
-    const g = RG.g; let best = 24, hit = null;
-    g.corners.forEach((q, i) => { const sc = w2s(q[0], q[1]), d = Math.hypot(sc[0] - p.x, sc[1] - p.y); if (d < best) { best = d; hit = { type: 'corner', i }; } });
-    for (let i = 0; i < g.n; i++) { const h = midHandle(g, i), sc = w2s(h[0], h[1]), d = Math.hypot(sc[0] - p.x, sc[1] - p.y); if (d < best) { best = d; hit = { type: 'bend', i }; } }
-    if (hit) Object.assign(gest, hit, { rid: R.id, g });
   } else if (UI.mode === 'rooms') {
     if (UI.addTpl) { Object.assign(gest, { type: 'add', w0: snapPoint(s2w(p.x, p.y), null) }); return; }
     const h = R && rotHandle(R.id);
     if (h && Math.hypot(p.x - h.sx, p.y - h.sy) < 26) { const w = s2w(p.x, p.y); Object.assign(gest, { type: 'rrot', rid: R.id, C: h.C, x0: num(R.x0), y0: num(R.y0), a0: num(R.a0), phi0: Math.atan2(w[1] - h.C[1], w[0] - h.C[0]) }); return; }
+    // углы выбранной комнаты и ромб выбранной стены (дуга)
+    if (RG && RG.g) {
+      const g = RG.g; let best = 22, hit = null;
+      g.corners.forEach((q, i) => { const sc = w2s(q[0], q[1]), d = Math.hypot(sc[0] - p.x, sc[1] - p.y); if (d < best) { best = d; hit = { type: 'corner', i }; } });
+      if (UI.wall && UI.wall.rid === R.id && UI.wall.i < g.n) { const hh = midHandle(g, UI.wall.i), sc = w2s(hh[0], hh[1]), d = Math.hypot(sc[0] - p.x, sc[1] - p.y); if (d < Math.min(best, 24)) hit = { type: 'bend', i: UI.wall.i }; }
+      if (hit) { Object.assign(gest, hit, { rid: R.id, g }); return; }
+    }
+    // двигается только выбранная комната: иначе по плану из комнат карту не сдвинуть
     const rid = roomAt(s2w(p.x, p.y));
-    if (rid) {
-      if (rid !== UI.room) { UI.room = rid; renderPlanTab(); renderCtxbar(); }
+    if (rid && rid === UI.room) {
       const r = room(rid), others = [];
       for (const o of S.rooms) if (o.id !== rid) { const G = MODEL.geo[o.id]; if (G && G.g) others.push(...G.g.corners); }
       Object.assign(gest, { type: 'room', rid, x0: num(r.x0), y0: num(r.y0), mine: MODEL.geo[rid].g.corners.map(q => q.slice()), others });
@@ -708,8 +838,9 @@ function placeRoomAt(tplId, w) {
 }
 function finishAdd(r) {
   PF.haptic('medium');
-  S.rooms.push(r); UI.room = r.id; UI.addTpl = null; UI.addPrev = null;
-  afterRooms('Комната «' + r.name + '» добавлена. Тяните её пальцем, круглая ручка сверху — поворот. Проём в соседнюю комнату — на шаге 1.');
+  S.rooms.push(r); UI.room = r.id; UI.addTpl = null; UI.addPrev = null; UI.wall = null;
+  const msg = syncAutoDoors([r.id]);
+  afterRooms(msg || 'Комната «' + r.name + '» добавлена. Тяните её пальцем к соседней — прилипнет, и появится проём. Круглая ручка сверху — поворот.');
   renderCtxbar();
 }
 function endPointer(e) {
@@ -732,7 +863,11 @@ function endPointer(e) {
   }
   if (wasTap && g.type !== 'prot' && g.type !== 'rrot') selectAt(g.sx, g.sy);
   if (ptrs.size) startGesture(); else gest = null;
-  if (g && g.moved && ['corner', 'bend', 'room', 'rrot'].includes(g.type)) { renderPlanTab(); invalidate({ fast: true }); }
+  if (g && g.moved && ['corner', 'bend', 'room', 'rrot'].includes(g.type)) {
+    const msg = g.type === 'bend' ? '' : syncAutoDoors([g.rid]);
+    recomputeNow(); renderPlanTab(); renderCtxbar(); invalidate({ fast: true });
+    if (msg) { say(msg, 'ok'); PF.haptic('ok'); }
+  }
   if (g && g.moved && (g.type === 'pattern' || g.type === 'prot')) { renderCtxbar(); invalidate({ fast: true }); }
 }
 cv.addEventListener('pointerup', endPointer);
@@ -744,6 +879,14 @@ cv.addEventListener('wheel', e => {
 }, { passive: false });
 function selectAt(x, y) {
   if (!MODEL) return; const w = s2w(x, y);
+  if (UI.mode === 'rooms') {
+    UI.lastDoor = null;
+    const wh = wallHit(x, y); if (wh) { selectWall(wh); return; }
+    const rid = roomAt(w), had = !!UI.wall; UI.wall = null; UI.delArm = null;
+    if (rid && rid !== UI.room) { UI.room = rid; renderPlanTab(); saveUI(); say('Выбрана «' + roomName(rid) + '». Тяните её пальцем, круглая ручка — поворот, кружки — углы.'); }
+    else if (had) modeHint();
+    renderCtxbar(); draw(); return;
+  }
   if (UI.mode === 'pattern') {
     const res = MODEL.byKey[UI.target], u = res && !res.err ? res.unit : null;
     const hit = u && (u.kind === 'floor' || u.kind === 'room') ? wallAt(x, y, u.roomIds) : null;
@@ -768,42 +911,70 @@ function selectAt(x, y) {
   UI.sel = found && !(UI.sel && UI.sel.key === found.key && UI.sel.id === found.id) ? found : null;
   renderPieceInfo(); draw();
 }
-/* полоса действий под панелью инструментов: зависит от режима карты */
+/* полоса действий у карты: зависит от шага и от того, что выбрано */
+const BTN = (act, label, attrs, cls) => '<button class="btn small' + (cls ? ' ' + cls : '') + '" type="button" data-act="' + act + '"' + (attrs || '') + '>' + label + '</button>';
+function wallOk() { const w = UI.wall; if (!w || !MODEL) return null; const r = room(w.rid), G = r && MODEL.geo[r.id]; if (!G || !G.g || w.i >= G.g.n) return null; return { r, G, g: G.g, i: w.i, t: w.t || 0 }; }
+function doorRef(ref) { if (!ref) return null; const r = room(ref.rid), d = r && (r.doors || []).find(x => x.id === ref.id); return d ? { r, d } : null; }
 function renderCtxbar() {
   const el = $('#ctxbar'); if (!el) return; let h = '';
   if (UI.mode === 'rooms') {
+    const W = wallOk(), fresh = doorRef(UI.lastDoor);
     if (UI.addTpl) {
-      h = '<span class="ctx-t"><b>Нажмите на карту</b> — комната встанет туда' + (UI.addTpl === 'rect' ? '. Или нарисуйте прямоугольник пальцем' : '') + '.</span>' +
+      h = '<span class="ctx-t"><b>Нажмите на карту</b>' + (UI.addTpl === 'rect' ? ' или нарисуйте пальцем' : '') + '</span>' +
         TEMPLATES.map(t => '<button class="chip" type="button" data-act="add-tpl" data-tpl="' + t.id + '" aria-pressed="' + (UI.addTpl === t.id) + '">' + esc(t.name) + '</button>').join('') +
-        '<button class="btn small" type="button" data-act="add-cancel">Отмена</button>';
+        BTN('add-cancel', 'Отмена');
+    } else if (W) {
+      const c = dist(W.g.corners[W.i], W.g.corners[(W.i + 1) % W.g.n]), isArc = Math.abs(W.g.arcs[W.i]) >= 0.5;
+      h = BTN('wall-back', ICON.back, ' aria-label="Назад к комнате" title="Назад к комнате"', 'ghost') + '<span class="ctx-t">Стена <b>' + (W.i + 1) + '</b> · ' + mm(c) + '</span>' +
+        (isArc ? '' : BTN('wall-door', ICON.plus + 'Проём') + BTN('wall-niche', ICON.plus + 'Ниша') + BTN('wall-box', ICON.plus + 'Выступ')) +
+        BTN('wall-arc', isArc ? 'Сделать прямой' : '⌒ Дуга') + (isArc ? '' : BTN('wall-cut', 'Угол здесь', ' title="Разделить стену в месте касания"'));
     } else {
       const r = curRoom();
-      h = '<button class="btn small primary" type="button" data-act="add-start">' + ICON.plus + 'Комната</button>' +
-        (r ? '<span class="ctx-t">' + esc(r.name) + ':</span><button class="btn small" type="button" data-act="room-rotl" title="Повернуть против часовой стрелки">↺ 90°</button><button class="btn small" type="button" data-act="room-rotr" title="Повернуть по часовой стрелке">↻ 90°</button><button class="btn small" type="button" data-act="room-dup">Копия</button>' +
-          (S.rooms.length > 1 ? '<button class="btn small danger" type="button" data-act="room-del">' + (UI.delArm === 'room:' + r.id ? 'Точно удалить?' : 'Удалить') + '</button>' : '') : '');
+      if (fresh) h = '<span class="ctx-t">Проём <b>' + mm(fresh.d.width) + '</b></span>' + BTN('door-full', fresh.d.full ? 'Дверь 900' : 'Во всю стену') + BTN('door-remove', 'Убрать', '', 'danger') + '<span class="ctx-sep"></span>';
+      h += BTN('add-start', ICON.plus + 'Комната', '', 'primary') + (r ? '<span class="ctx-sep"></span>' + BTN('room-rotr', ICON.rot + '90°', ' title="Повернуть «' + esc(r.name) + '» на 90°"') + BTN('room-dup', ICON.copy + 'Копия', ' title="Копия «' + esc(r.name) + '»"') +
+        (S.rooms.length > 1 ? BTN('room-del', UI.delArm === 'room:' + r.id ? 'Точно удалить?' : 'Удалить', '', 'danger') : '') : '');
     }
   } else if (UI.mode === 'pattern') {
     const kind = targetKind(UI.target), P = curP();
-    if (kind === 'border') h = '<span class="ctx-t">Рамка идёт вдоль стен. Стрелки ◀ ▶ внизу сдвигают стыки.</span>';
+    if (kind === 'border') h = '<span class="ctx-t">Рамка идёт вдоль стен. Стрелки ◀ ▶ под картой сдвигают стыки.</span>' + BTN('optimize', ICON.star + 'Подобрать', '', 'primary');
     else {
       const g = patDef(P.type).group, axis = g === 'herring' || g === 'chevron';
-      h = '<div class="seg mini" role="group" aria-label="Направление"><button type="button" data-act="dir" data-v="along" aria-pressed="' + (P.dir === 'along') + '">' + (axis ? 'Ось вдоль' : 'Вдоль') + '</button><button type="button" data-act="dir" data-v="across" aria-pressed="' + (P.dir === 'across') + '">Поперёк</button><button type="button" data-act="dir" data-v="diag" aria-pressed="' + (P.dir === 'diag') + '">45°</button></div>' +
-        '<button class="btn small" type="button" data-act="rot-step" data-v="-15" title="Повернуть рисунок на 15° против часовой">↺ 15°</button><button class="btn small" type="button" data-act="rot-step" data-v="15" title="Повернуть рисунок на 15° по часовой">↻ 15°</button>' +
+      h = BTN('optimize', ICON.star + 'Подобрать', '', 'primary') +
+        '<div class="seg mini" role="group" aria-label="Направление"><button type="button" data-act="dir" data-v="along" aria-pressed="' + (P.dir === 'along') + '">' + (axis ? 'Ось вдоль' : 'Вдоль') + '</button><button type="button" data-act="dir" data-v="across" aria-pressed="' + (P.dir === 'across') + '">Поперёк</button><button type="button" data-act="dir" data-v="diag" aria-pressed="' + (P.dir === 'diag') + '">45°</button></div>' +
+        BTN('rot-step', '↺ 15°', ' data-v="-15" title="Повернуть рисунок на 15° против часовой"') + BTN('rot-step', '↻ 15°', ' data-v="15" title="Повернуть рисунок на 15° по часовой"') +
         '<label class="inp ang" title="Угол к опорной стене"><input id="ctxAngle" inputmode="decimal" value="' + f1(shownAngle(P)) + '" aria-label="Угол рисунка к опорной стене"><i>°</i></label>' +
-        '<button class="btn small" type="button" data-act="flipU" title="Развернуть рисунок в обратную сторону">⇄ Развернуть</button>';
+        BTN('flipU', '⇄ Развернуть', ' title="Развернуть рисунок в обратную сторону"');
     }
+  } else if (UI.tab === 'res') {
+    h = BTN('export-img', ICON.img + 'Картинка', '', 'primary') + BTN('export-share', ICON.share + 'Отправить расчёт') + BTN('export-copy', 'Скопировать');
+  } else {
+    const M = S.mat, c = catById(M.cat);
+    h = '<span class="ctx-t">Покрытие: <b>' + esc(c.name.toLowerCase()) + ' ' + mm(num(M.L)) + '×' + mm(num(M.W)) + '</b> · ' + esc(patDef(S.floorPat.type).name.toLowerCase()) + '</span>';
   }
-  el.innerHTML = h; el.hidden = !h; syncTgBack();
+  el.innerHTML = h; el.hidden = !h; el.scrollLeft = 0; fadeMore(el); syncTgBack();
 }
+/* полоса прокручивается вбок: справа мягкое затухание, пока есть что листать */
+function fadeMore(el) { if (!el) return; requestAnimationFrame(() => { el.classList.toggle('more', el.scrollWidth - el.clientWidth - el.scrollLeft > 4); }); }
+document.addEventListener('scroll', e => { const t = e.target; if (t && t.classList && (t.classList.contains('ctxbar') || t.classList.contains('pills'))) fadeMore(t); }, true);
+window.addEventListener('resize', () => { fadeMore($('#ctxbar')); fadeMore($('#status')); });
 
 /* ================= панель: вкладки и поля ================= */
 function setTab(t) {
-  UI.tab = t;
+  if (!MODE_OF[t]) t = 'plan';
+  const changed = UI.tab !== t; UI.tab = t; UI.mode = MODE_OF[t];
+  if (changed) { UI.addTpl = null; UI.addPrev = null; UI.wall = null; UI.lastDoor = null; UI.delArm = null; if (t === 'plan') { UI.sel = null; UI.hl = null; renderPieceInfo(); } }
   $$('.tab').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === t)));
   $$('.tabbody').forEach(b => { b.hidden = b.dataset.body !== t; });
   if (t === 'plan') renderPlanTab(); if (t === 'mat') renderMatTab(); if (t === 'pat') renderPatTab(); if (t === 'res') renderResults();
-  $('#panel').scrollTop = 0; saveUI(); syncTgBack();
+  if (changed) { $('#panel').scrollTop = 0; syncToolbar(); renderStatus(); modeHint(); draw(); }
+  saveUI(); syncTgBack();
 }
+/* раскрывающиеся разделы: открытые запоминаем */
+const ACC_DEF = { shape: true, walls: false, doors: false, niches: false, own: false, pos: false, kv: false, floor: false, plank: true, mount: false, dir: false, offs: false, comp: false, rules: false };
+const accOpen = k => k in UI.open ? !!UI.open[k] : !!ACC_DEF[k];
+const acc = (k, title, sum, body, sid) => '<details class="acc" data-acc="' + k + '"' + (accOpen(k) ? ' open' : '') + '><summary><b>' + title + '</b><small' + (sid ? ' id="' + sid + '"' : '') + '>' + sum + '</small></summary><div class="accb">' + body + '</div></details>';
+function applyAcc() { $$('details.acc[data-acc]').forEach(d => { const o = accOpen(d.dataset.acc); if (d.open !== o) d.open = o; }); }
+document.addEventListener('toggle', e => { const d = e.target; if (d && d.matches && d.matches('details.acc[data-acc]')) { if (UI.open[d.dataset.acc] !== d.open) { UI.open[d.dataset.acc] = d.open; saveUI(); } } }, true);
 $$('.tab').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
 function getK(path) { return path.split('.').reduce((o, k) => o == null ? o : o[k], S); }
 function setK(path, val) { const ks = path.split('.'); let o = S; for (let i = 0; i < ks.length - 1; i++) o = o[ks[i]]; o[ks[ks.length - 1]] = val; }
@@ -815,7 +986,7 @@ function syncInputs() {
   syncPatInputs();
   setIn($('#projName'), S.name || '');
 }
-function syncPatInputs() { const P = curP(); $$('[data-pk]').forEach(el => setIn(el, P[el.dataset.pk])); const ca = $('#ctxAngle'); if (ca) setIn(ca, Math.round(shownAngle(P) * 10) / 10); }
+function syncPatInputs() { const P = curP(); $$('[data-pk]').forEach(el => setIn(el, P[el.dataset.pk])); const ca = $('#ctxAngle'); if (ca) setIn(ca, Math.round(shownAngle(P) * 10) / 10); renderSums(); }
 function readIn(t) { if (t.type === 'checkbox') return t.checked; if ('num' in t.dataset) { if (String(t.value).trim() === '') return undefined; const v = num(t.value, NaN); return Number.isFinite(v) ? v : undefined; } return t.value; }
 document.addEventListener('input', e => {
   const t = e.target; if (!(t instanceof HTMLElement) || !t.closest('.app')) return;
@@ -827,29 +998,54 @@ document.addEventListener('input', e => {
   if (t.dataset.pk) { const v = readIn(t); if (v === undefined) return; const P = curP(); P[t.dataset.pk] = v; clearVariantMark(); if (['refRoom', 'refWall'].includes(t.dataset.pk)) { renderRefSelects(); recomputeNow(); centerTarget(UI.target, true); } if (t.dataset.pk === 'chevAngle') renderPatList(); invalidate(); return; }
   if (t.dataset.rk) { const r = curRoom(); const v = t.dataset.rk === 'name' ? t.value : readIn(t); if (v === undefined) return; r[t.dataset.rk] = v; invalidate(); return; }
   if (t.dataset.w !== undefined) { onWallInput(t); return; }
-  if (t.dataset.d !== undefined) { const d = curRoom().doors[+t.dataset.d]; if (!d) return; const v = readIn(t); if (v === undefined) return; d[t.dataset.df] = t.dataset.df === 'wall' ? (v | 0) : v; invalidate(); return; }
+  if (t.dataset.rect) { const r = curRoom(), v = num(t.value, NaN); if (!(v >= 300) || !isRect(r)) return; (t.dataset.rect === 'L' ? [0, 2] : [1, 3]).forEach(i => { r.walls[i].len = v; }); invalidate(); return; }
+  if (t.dataset.n !== undefined) { const x = (curRoom().niches || [])[+t.dataset.n]; if (!x) return; const f = t.dataset.nf, v = readIn(t); if (v === undefined) return; x[f] = f === 'wall' ? (v | 0) : v; if (f === 'floor' || f === 'wall') renderRoomEditor(); invalidate(); return; }
+  if (t.dataset.d !== undefined) { const d = curRoom().doors[+t.dataset.d]; if (!d) return; const v = readIn(t); if (v === undefined) return; d[t.dataset.df] = t.dataset.df === 'wall' ? (v | 0) : v; delete d.full; invalidate(); return; }
   if (t.dataset.ins !== undefined) { const ins = curRoom().inserts[+t.dataset.ins]; if (!ins) return; const v = readIn(t); if (v === undefined) return; ins[t.dataset.f] = v; invalidate(); return; }
   if (t.dataset.bf) { const B = curRoom().border, v = readIn(t); if (v === undefined) return; B[t.dataset.bf] = v; invalidate(); return; }
 });
 function recomputeNow() { MODEL = computeAll(); fixTargets(); }
+/* после правки размеров комнаты: проёмы к соседям появляются и подстраиваются.
+   Панель перерисовываем только когда палец ушёл из неё — иначе пропадёт поле, в которое как раз переходят */
+let editorDirty = false, ptrDown = 0; const afterTap = [];
+/* пока палец на экране, кнопки не пересоздаём: иначе нажатие на них потеряется */
+function whenFree(fn) { if (ptrDown) afterTap.push(fn); else fn(); }
+document.addEventListener('pointerdown', () => { ptrDown++; }, true);
+const ptrUp = () => { ptrDown = Math.max(0, ptrDown - 1); if (!ptrDown && afterTap.length) setTimeout(() => { const list = afterTap.splice(0); list.forEach(f => f()); }, 0); };
+document.addEventListener('pointerup', ptrUp, true); document.addEventListener('pointercancel', ptrUp, true);
+function editorLater() { setTimeout(() => whenFree(() => { const ed = $('#roomEditor'); if (ed && ed.contains(document.activeElement)) editorDirty = true; else { editorDirty = false; renderRoomEditor(); applyAcc(); } }), 0); }
+document.addEventListener('change', e => {
+  const t = e.target; if (!(t instanceof HTMLElement) || !t.closest('#roomEditor')) return;
+  if (t.dataset.w !== undefined || t.dataset.rect || ['x0', 'y0', 'a0'].includes(t.dataset.rk)) { const msg = syncAutoDoors([curRoom().id]); recomputeNow(); renderRoomList(); renderRoomSums(); invalidate({ fast: true }); if (msg) { say(msg, 'ok'); whenFree(renderCtxbar); editorLater(); } }
+});
+document.addEventListener('focusout', e => { if (editorDirty && e.target.closest && e.target.closest('#roomEditor')) editorLater(); });
 
-/* ================= 1. План: комнаты и стены ================= */
+/* ================= 1. Комнаты: план, стены, проёмы, ниши ================= */
 function roomSize(g) { const b = bboxOf(g.poly); return mm(b.u1 - b.u0) + '×' + mm(b.v1 - b.v0); }
 function renderRoomList() {
   const el = $('#roomList'); if (!el) return;
   let total = 0;
-  el.innerHTML = S.rooms.map(r => {
-    const G = MODEL && MODEL.geo[r.id], ok = G && G.g && !G.err, a = ok ? Math.abs(area(G.g.poly)) : 0; total += a;
-    const badge = G && G.err ? '<span class="badge err">ошибка</span>' : r.own ? '<span class="badge own">свой рисунок</span>' : '<span class="badge">' + (S.rooms.length > 1 ? 'сквозной' : 'рисунок') + '</span>';
-    return '<button class="rcard" type="button" data-act="room-select" data-room="' + r.id + '" aria-pressed="' + (r.id === UI.room) + '"><b>' + esc(r.name) + '</b>' + badge + '<small>' + (ok ? fm2(a) + ' м² · ' + roomSize(G.g) + ' мм' : esc(G ? G.err : '')) + '</small></button>';
-  }).join('');
+  const info = S.rooms.map(r => { const G = MODEL && MODEL.geo[r.id], ok = G && G.g && !G.err, a = ok ? Math.abs(area(G.g.poly)) : 0; total += a; return { r, ok, txt: ok ? fm2(a) + ' м²' + (r.own ? ' · свой' : '') : 'ошибка' }; });
+  // те же комнаты — меняем только текст: кнопки не пересоздаём, чтобы не терялись нажатия
+  const cards = $$('.rcard[data-room]', el);
+  if (cards.length === info.length && cards.every((c, i) => c.dataset.room === info[i].r.id)) {
+    cards.forEach((c, i) => { const x = info[i]; c.setAttribute('aria-pressed', String(x.r.id === UI.room)); c.querySelector('b').textContent = x.r.name; const sm = c.querySelector('small'); sm.textContent = x.txt; sm.className = x.ok ? '' : 'err'; });
+    const add = $('.rcard.add', el); if (add) add.setAttribute('aria-expanded', String(!!UI.addRoom));
+  } else el.innerHTML = info.map(x => '<button class="rcard" type="button" data-act="room-select" data-room="' + x.r.id + '" aria-pressed="' + (x.r.id === UI.room) + '"><b>' + esc(x.r.name) + '</b><small' + (x.ok ? '' : ' class="err"') + '>' + x.txt + '</small></button>').join('') +
+    '<button class="rcard add" type="button" data-act="room-add-open" aria-expanded="' + !!UI.addRoom + '">' + ICON.plus + '<span>Комната</span></button>';
   $('#floorSum').textContent = S.rooms.length + ' ' + plural(S.rooms.length, 'комната', 'комнаты', 'комнат') + ' · ' + fm2(total) + ' м²';
+  const wt = $('#wallTSum'); if (wt) wt.textContent = mm(num(S.set.wallT, 120)) + ' мм';
 }
 function renderTplChips() { $('#tplNew').innerHTML = TEMPLATES.filter(t => t.id !== 'rect').map(t => '<button class="chip" type="button" data-act="room-add-tpl" data-tpl="' + t.id + '">' + esc(t.name) + '</button>').join(''); }
-function renderPlanTab() { renderRoomList(); renderRoomEditor(); $('#helpBox').hidden = !UI.help; $('#addRoomBox').hidden = !UI.addRoom; }
+function renderPlanTab() { renderRoomList(); renderRoomEditor(); $('#addRoomBox').hidden = !UI.addRoom; applyAcc(); }
 const innerOf = turn => 180 - turn;
-function wallCard(r, i, g) {
+const isRect = r => r.walls.length === 4 && r.walls.every((w, i) => Math.abs(num(w.arc)) < 0.5 && (i === 0 || Math.abs(num(w.turn) - 90) < 0.01)) && Math.abs(num(r.walls[0].len) - num(r.walls[2].len)) < 0.5 && Math.abs(num(r.walls[1].len) - num(r.walls[3].len)) < 0.5;
+function wallCard(r, i, g, joints) {
   const w = r.walls[i], arc = num(w.arc), isArc = Math.abs(arc) >= 0.5, c = num(w.len);
+  const js = isArc ? [] : joints.filter(a => a.i === i);
+  const items = [];
+  (r.doors || []).forEach(d => { if ((d.wall | 0) === i) items.push((d.full ? 'проход ' : 'проём ') + mm(d.width) + ' (от угла ' + mm(d.pos) + ')'); });
+  (r.niches || []).forEach(x => { if ((x.wall | 0) === i) items.push((x.kind === 'box' ? 'выступ ' : 'ниша ') + mm(x.width) + '×' + mm(x.depth) + (x.kind !== 'box' && x.floor === false ? ', без пола' : '')); });
   return '<div class="wcard' + (i === UI.wallFocus ? ' sel' : '') + '" data-wi="' + i + '">' +
     '<div class="whead"><span class="wn">' + (i + 1) + '</span><b>Стена ' + (i + 1) + '</b>' +
     '<div class="seg mini" role="group" aria-label="Форма стены ' + (i + 1) + '"><button type="button" data-act="wall-shape" data-w="' + i + '" data-v="straight" aria-pressed="' + !isArc + '">Прямая</button><button type="button" data-act="wall-shape" data-w="' + i + '" data-v="arc" aria-pressed="' + isArc + '">Дуга</button></div>' +
@@ -859,6 +1055,8 @@ function wallCard(r, i, g) {
     (isArc ? '<label class="fld"><span>Прогиб дуги</span><span class="inp"><input id="w' + i + 'arc" data-w="' + i + '" data-wf="arc" inputmode="decimal" value="' + mm(Math.abs(arc)) + '"><i>мм</i></span></label>' +
       '<label class="fld"><span>или радиус</span><span class="inp"><input id="w' + i + 'rad" data-w="' + i + '" data-wf="rad" inputmode="decimal" value="' + mm(arcRadius(c, arc)) + '"><i>мм</i></span></label>' : '') + '</div>' +
     (isArc ? '<div class="wrow"><div class="seg mini" role="group" aria-label="Куда выгнута стена"><button type="button" data-act="wall-side" data-w="' + i + '" data-v="out" aria-pressed="' + (arc > 0) + '">Наружу</button><button type="button" data-act="wall-side" data-w="' + i + '" data-v="in" aria-pressed="' + (arc < 0) + '">Внутрь</button></div><span class="hint" id="w' + i + 'hint">длина по дуге ≈ ' + mm(arcLength(c, arc)) + ' мм</span></div>' : '') +
+    (js.length ? '<div class="wjoin">По стыкам: ' + jointSegs(dist(g.corners[i], g.corners[(i + 1) % g.n]), js).map(sg => '<span' + (sg.to ? ' class="sh"' : '') + '>' + mm(sg.len) + '</span>' + (sg.to ? ' общая с «' + esc(roomName(sg.to)) + '»' : '')).join(' ') + '</div>' : '') +
+    (items.length ? '<div class="wjoin">' + esc(items.join(' · ')) + '</div>' : '') +
     '</div>';
 }
 function cornerRow(r, i) {
@@ -866,35 +1064,76 @@ function cornerRow(r, i) {
   const chips = [[90, 'обычный'], [270, 'выступ'], [135, ''], [180, 'прямо']].map(([a, t]) => '<button class="chip" type="button" data-act="corner-set" data-w="' + i + '" data-v="' + a + '" aria-pressed="' + (Math.abs(v - a) < 0.05) + '" title="' + (t || a + '°') + '">' + a + '°' + (t ? ' ' + t : '') + '</button>').join('');
   return '<div class="corner">Угол между стенами ' + i + ' и ' + (i + 1) + ': ' + chips + '<span class="inp"><input id="c' + i + 'ang" data-w="' + i + '" data-wf="ang" inputmode="decimal" value="' + f1(v) + '" aria-label="Угол между стенами ' + i + ' и ' + (i + 1) + '"><i>°</i></span></div>';
 }
+const fldIn = (label, attrs, val, unit) => '<label class="fld"><span>' + label + '</span><span class="inp"><input ' + attrs + ' inputmode="decimal" value="' + val + '">' + (unit ? '<i>' + unit + '</i>' : '') + '</span></label>';
+function wallSelect(attrs, cur, g, onlyStraight) {
+  let o = ''; for (let i = 0; i < g.n; i++) { if (onlyStraight && Math.abs(g.arcs[i]) >= 0.5) continue; o += '<option value="' + i + '"' + (i === cur ? ' selected' : '') + '>' + (i + 1) + ' · ' + mm(dist(g.corners[i], g.corners[(i + 1) % g.n])) + '</option>'; }
+  return '<label class="fld"><span>Стена</span><span class="inp"><select ' + attrs + ' data-num>' + o + '</select></span></label>';
+}
+function roomSums(r, G, g) {
+  return {
+    shape: roomSize(g) + ' мм',
+    walls: g.n + ' ' + plural(g.n, 'стена', 'стены', 'стен') + (g.arcs.some(a => Math.abs(a) >= 0.5) ? ', есть дуга' : ''),
+    doors: (r.doors || []).length ? (r.doors.length + ' шт') : 'нет',
+    niches: (r.niches || []).length ? (r.niches.length + ' шт') : 'нет',
+    own: r.own ? 'свой' : 'общий',
+    pos: mm(r.x0) + ', ' + mm(r.y0) + (num(r.a0) ? ' · ' + f1(mod(num(r.a0), 360)) + '°' : ''),
+    kv: G && G.g && !G.err ? fm2(Math.abs(area(G.g.poly))) + ' м²' : '—',
+  };
+}
+function renderRoomSums() {
+  const r = curRoom(); if (!r) return; const G = MODEL && MODEL.geo[r.id], g = G && G.g ? G.g : roomGeom(r), sm = roomSums(r, G, g);
+  for (const k in sm) { const el = $('#sum-' + k); if (el) el.textContent = sm[k]; }
+}
 function renderRoomEditor() {
   const el = $('#roomEditor'), r = curRoom(); if (!r) { el.innerHTML = ''; return; }
-  const G = MODEL && MODEL.geo[r.id], g = G && G.g ? G.g : roomGeom(r);
-  const walls = r.walls.map((w, i) => (i > 0 ? cornerRow(r, i) : '') + wallCard(r, i, g)).join('');
-  const straight = []; for (let i = 0; i < g.n; i++) if (Math.abs(g.arcs[i]) < 0.5) straight.push(i);
-  const doors = (r.doors || []).map((d, j) => '<div class="drow"><label class="fld"><span>Стена</span><span class="inp"><select id="d' + j + 'wall" data-d="' + j + '" data-df="wall" data-num>' + straight.map(i => '<option value="' + i + '"' + (i === d.wall ? ' selected' : '') + '>' + (i + 1) + '</option>').join('') + '</select></span></label>' +
-    '<label class="fld"><span>От угла</span><span class="inp"><input id="d' + j + 'pos" data-d="' + j + '" data-df="pos" data-num inputmode="decimal" value="' + mm(d.pos) + '"><i>мм</i></span></label>' +
-    '<label class="fld"><span>Ширина</span><span class="inp"><input id="d' + j + 'w" data-d="' + j + '" data-df="width" data-num inputmode="decimal" value="' + mm(d.width) + '"><i>мм</i></span></label>' +
-    '<button class="icon" type="button" data-act="door-del" data-d="' + j + '" aria-label="Удалить проём ' + (j + 1) + '">' + ICON.del + '</button></div>').join('');
+  const G = MODEL && MODEL.geo[r.id], g = G && G.g ? G.g : roomGeom(r), joints = MODEL && MODEL.adj ? MODEL.adj.filter(a => a.a === r.id) : [], sm = roomSums(r, G, g);
+  const walls = r.walls.map((w, i) => (i > 0 ? cornerRow(r, i) : '') + wallCard(r, i, g, joints)).join('');
+  const rect = isRect(r), b = bboxOf(g.poly);
+  const doors = (r.doors || []).map((d, j) => {
+    const adjW = joints.filter(a => a.i === (d.wall | 0)), to = d.to && room(d.to) ? d.to : adjW[0] && adjW[0].b;
+    return '<div class="orow"><div class="whead"><b>Проём ' + (j + 1) + (to ? ' → «' + esc(roomName(to)) + '»' : '') + '</b>' +
+      (adjW.length ? '<button class="chip" type="button" data-act="door-full" data-d="' + j + '" aria-pressed="' + !!d.full + '">Во всю стену</button>' : '') +
+      '<button class="icon" type="button" data-act="door-del" data-d="' + j + '" aria-label="Удалить проём ' + (j + 1) + '">' + ICON.del + '</button></div>' +
+      '<div class="ofields">' + wallSelect('id="d' + j + 'wall" data-d="' + j + '" data-df="wall"', d.wall | 0, g, true) + fldIn('От угла', 'id="d' + j + 'pos" data-d="' + j + '" data-df="pos" data-num', mm(d.pos), 'мм') + fldIn('Ширина', 'id="d' + j + 'w" data-d="' + j + '" data-df="width" data-num', mm(d.width), 'мм') + '</div></div>';
+  }).join('');
+  const niches = (r.niches || []).map((x, j) => {
+    const ng = (g.niches || []).find(q => q.niche === x), box = x.kind === 'box';
+    const state = !ng ? '<p class="note warn">Не помещается на стене ' + ((x.wall | 0) + 1) + ': проверьте «от угла» и ширину.</p>' : ng.off ? '<p class="note bad">Так не построить: два выступа в одном углу, выступ во всю стену или рядом с дугой.</p>' : '';
+    return '<div class="orow"><div class="whead"><b>' + (box ? 'Выступ ' : 'Ниша ') + (j + 1) + (x.name ? ' · ' + esc(x.name) : '') + '</b>' +
+      '<div class="seg mini" role="group" aria-label="Ниша или выступ"><button type="button" data-act="niche-kind" data-n="' + j + '" data-v="niche" aria-pressed="' + !box + '">Ниша</button><button type="button" data-act="niche-kind" data-n="' + j + '" data-v="box" aria-pressed="' + box + '">Выступ</button></div>' +
+      '<button class="icon" type="button" data-act="niche-del" data-n="' + j + '" aria-label="Удалить ' + (box ? 'выступ' : 'нишу') + ' ' + (j + 1) + '">' + ICON.del + '</button></div>' +
+      '<div class="ofields">' + wallSelect('id="n' + j + 'wall" data-n="' + j + '" data-nf="wall"', x.wall | 0, g, true) + fldIn('От угла', 'id="n' + j + 'pos" data-n="' + j + '" data-nf="pos" data-num', mm(x.pos), 'мм') +
+      fldIn('Ширина', 'id="n' + j + 'w" data-n="' + j + '" data-nf="width" data-num', mm(x.width), 'мм') + fldIn(box ? 'Выступает на' : 'Глубина', 'id="n' + j + 'd" data-n="' + j + '" data-nf="depth" data-num', mm(x.depth), 'мм') + '</div>' +
+      (box ? '' : '<label class="check"><input type="checkbox" id="n' + j + 'fl" data-n="' + j + '" data-nf="floor"' + (x.floor !== false ? ' checked' : '') + '> Кладём пол в нише</label>') + state + '</div>';
+  }).join('');
   el.innerHTML =
-    '<div class="sec"><h3>Комната «' + esc(r.name) + '»</h3><label class="fld"><span>Название</span><span class="inp"><input class="txt" id="rName" data-rk="name" value="' + esc(r.name) + '" maxlength="40"></span></label>' +
-    '<div class="row-btns"><button class="btn small" type="button" data-act="room-dup">Копия</button><button class="btn small" type="button" data-act="room-rot">Повернуть 90°</button>' +
+    '<div class="sec"><div class="rhead"><label class="fld"><span>Название комнаты</span><span class="inp"><input class="txt" id="rName" data-rk="name" value="' + esc(r.name) + '" maxlength="40"></span></label></div>' +
+    '<div class="row-btns"><button class="btn small" type="button" data-act="room-rotr">' + ICON.rot + 'Повернуть 90°</button><button class="btn small" type="button" data-act="room-dup">' + ICON.copy + 'Копия</button>' +
     (S.rooms.length > 1 ? '<button class="btn small danger" type="button" data-act="room-del">' + (UI.delArm === 'room:' + r.id ? 'Точно удалить?' : 'Удалить') + '</button>' : '') + '</div>' +
-    (G && G.err ? '<p class="note bad">' + esc(G.err) + '</p>' : '') + '</div>' +
-    '<div class="sec"><h3>Форма <small>заменит стены комнаты</small></h3><div class="grid2"><label class="fld"><span>Длина</span><span class="inp"><input id="rL" inputmode="decimal" value="' + mm(Math.max(...[0, 2].map(i => num((r.walls[i] || {}).len)))) + '"><i>мм</i></span></label>' +
-    '<label class="fld"><span>Ширина</span><span class="inp"><input id="rW" inputmode="decimal" value="' + mm(Math.max(...[1, 3].map(i => num((r.walls[i] || {}).len)))) + '"><i>мм</i></span></label></div>' +
-    '<button class="btn" type="button" data-act="room-rect">Сделать прямоугольником</button>' +
-    '<div class="chips">' + TEMPLATES.filter(t => t.id !== 'rect').map(t => '<button class="chip" type="button" data-act="room-tpl" data-tpl="' + t.id + '">' + esc(t.name) + '</button>').join('') + '</div></div>' +
-    '<div class="sec"><h3>Стены <small>по часовой стрелке</small></h3><p class="note">Идите вдоль стен по часовой стрелке и вписывайте длины. Между стенами — угол комнаты: 90° обычный, 270° — выступ внутрь комнаты. Стену можно сделать дугой: впишите прогиб или радиус.</p>' +
-    '<div class="walls" id="walls">' + walls + '</div>' +
-    '<button class="btn" type="button" data-act="wall-add">' + ICON.plus + 'Добавить стену</button><p class="note" id="closureNote"></p></div>' +
-    '<div class="sec"><h3>Проёмы <small>рисунок идёт в соседнюю комнату</small></h3>' + (doors || '<p class="note">Проёмов нет. Добавьте проём, если пол без порога продолжается в соседнюю комнату.</p>') +
-    '<button class="btn" type="button" data-act="door-add">' + ICON.plus + 'Добавить проём</button>' +
-    '<p class="note">Соседняя комната должна стоять вплотную через стену ' + mm(num(S.set.wallT, 120)) + ' мм — подвиньте её на карте в режиме «Комнаты».</p></div>' +
-    '<div class="sec"><h3>Рисунок в этой комнате</h3><div class="seg" role="group" aria-label="Рисунок в комнате"><button type="button" data-act="own-set" data-v="0" aria-pressed="' + !r.own + '">Общий, сквозной</button><button type="button" data-act="own-set" data-v="1" aria-pressed="' + !!r.own + '">Свой</button></div>' +
-    '<p class="note">' + (r.own ? 'У комнаты свой рисунок и своё положение. Настройте его на шаге 3, покрытие — на шаге 2.' : 'Рисунок продолжается из соседних комнат без сдвига — как при укладке без порогов.') + '</p></div>' +
-    '<div class="sec"><h3>Положение на плане</h3><div class="grid2"><label class="fld"><span>X первого угла</span><span class="inp"><input id="rX" data-rk="x0" data-num inputmode="decimal" value="' + mm(r.x0) + '"><i>мм</i></span></label>' +
-    '<label class="fld"><span>Y первого угла</span><span class="inp"><input id="rY" data-rk="y0" data-num inputmode="decimal" value="' + mm(r.y0) + '"><i>мм</i></span></label></div></div>' +
-    '<div class="sec"><h3>Итог по комнате</h3><dl class="kv" id="roomKV"></dl></div>';
+    (G && G.err ? '<p class="note bad">' + esc(G.err) + '</p>' : '') + (G && G.warn ? '<p class="note warn">' + esc(G.warn) + '</p>' : '') + '</div>' +
+    acc('shape', 'Размер и форма', sm.shape,
+      '<div class="grid2">' + fldIn('Длина', 'id="rL" data-rect="L"', mm(rect ? num(r.walls[0].len) : b.u1 - b.u0), 'мм') + fldIn('Ширина', 'id="rW" data-rect="W"', mm(rect ? num(r.walls[1].len) : b.v1 - b.v0), 'мм') + '</div>' +
+      (rect ? '<p class="note">Прямоугольная комната: размеры меняются сразу. Для сложной формы выберите шаблон или правьте стены ниже.</p>' : '<button class="btn" type="button" data-act="room-rect">Сделать прямоугольником</button>') +
+      '<div class="chips">' + TEMPLATES.filter(t => t.id !== 'rect').map(t => '<button class="chip" type="button" data-act="room-tpl" data-tpl="' + t.id + '">' + esc(t.name) + '</button>').join('') + '</div>', 'sum-shape') +
+    acc('walls', 'Стены и углы', sm.walls,
+      '<p class="note">Идите вдоль стен по часовой стрелке и вписывайте длины. Угол 90° — обычный, 270° — выступ внутрь комнаты. Стену можно сделать дугой. На карте нажмите на стену — появятся кнопки для неё.</p>' +
+      '<div class="walls" id="walls">' + walls + '</div>' +
+      '<button class="btn" type="button" data-act="wall-add">' + ICON.plus + 'Добавить стену</button><p class="note" id="closureNote"></p>', 'sum-walls') +
+    acc('doors', 'Проёмы', sm.doors,
+      (doors ? '<div class="olist">' + doors + '</div>' : '<p class="note">Проёмов нет. Поставьте соседнюю комнату вплотную — проём появится сам. Или нажмите на стену на карте → «Проём».</p>') +
+      '<button class="btn" type="button" data-act="door-add">' + ICON.plus + 'Добавить проём</button>' +
+      '<p class="note">Через проём рисунок идёт в соседнюю комнату без порога. «Во всю стену» — проход на всю общую стену, тогда стена считается до угла соседней комнаты.</p>', 'sum-doors') +
+    acc('niches', 'Ниши и выступы', sm.niches,
+      (niches ? '<div class="olist">' + niches + '</div>' : '') +
+      '<div class="chips"><button class="chip add" type="button" data-act="niche-add" data-v="radiator">+ Ниша под батарею</button><button class="chip add" type="button" data-act="niche-add" data-v="wardrobe">+ Ниша под шкаф</button><button class="chip add" type="button" data-act="niche-add" data-v="box">+ Выступ, короб</button></div>' +
+      '<p class="note">Ниша уходит в стену, пол в неё заходит (снимите галочку, если под шкафом пол не кладут). Выступ — короб, колонна или стояк у стены: пол его обходит. «От угла» — от начала стены по часовой стрелке.</p>', 'sum-niches') +
+    acc('own', 'Рисунок в комнате', sm.own,
+      '<div class="seg" role="group" aria-label="Рисунок в комнате"><button type="button" data-act="own-set" data-v="0" aria-pressed="' + !r.own + '">Общий, сквозной</button><button type="button" data-act="own-set" data-v="1" aria-pressed="' + !!r.own + '">Свой</button></div>' +
+      '<p class="note">' + (r.own ? 'У комнаты свой рисунок и своё положение. Настройте его на шаге «Рисунок», покрытие — на шаге «Покрытие».' : 'Рисунок продолжается из соседних комнат без сдвига — как при укладке без порогов.') + '</p>', 'sum-own') +
+    acc('pos', 'Положение на плане', sm.pos,
+      '<div class="grid3">' + fldIn('X угла 1', 'id="rX" data-rk="x0" data-num', mm(r.x0), 'мм') + fldIn('Y угла 1', 'id="rY" data-rk="y0" data-num', mm(r.y0), 'мм') + fldIn('Поворот', 'id="rA" data-rk="a0" data-num', f1(mod(num(r.a0), 360)), '°') + '</div>' +
+      '<p class="note">Проще двигать комнату пальцем на карте: она прилипает к соседним через стену.</p>', 'sum-pos') +
+    acc('kv', 'Итог по комнате', sm.kv, '<dl class="kv" id="roomKV"></dl>', 'sum-kv');
   renderClosure(); renderRoomKV();
 }
 function renderClosure() {
@@ -927,36 +1166,135 @@ function onWallInput(t) {
   else if (f === 'rad') { const h = sagittaFromRadius(num(w.len), v); if (!Number.isFinite(h)) { say('Радиус меньше половины хорды (' + mm(num(w.len) / 2) + ' мм) — так дугу не построить.', 'bad'); return; } const sg = num(w.arc) < 0 ? -1 : 1; w.arc = sg * Math.max(1, h); }
   renderClosure(); renderWallHints(); invalidate();
 }
-function placeNewRoom() { const b = floorBBox(); return b ? [Math.round(b.u1 + 1000), Math.round(b.v0)] : [0, 0]; }
+/* новая комната встаёт вплотную к выбранной (справа, снизу, слева или сверху) — там, где свободно */
+function placeAttached(walls, a0) {
+  const T = Math.max(0, num(S.set.wallT, 120)), cur = curRoom(), G = cur && MODEL && MODEL.geo[cur.id];
+  const nb = bboxOf(roomGeom({ x0: 0, y0: 0, a0: num(a0), walls }).poly), W = nb.u1 - nb.u0, H = nb.v1 - nb.v0;
+  const busy = (x, y) => S.rooms.some(o => { const og = MODEL && MODEL.geo[o.id]; if (!og || !og.g) return false; const ob = bboxOf(og.g.poly); return x < ob.u1 - 1 && x + W > ob.u0 + 1 && y < ob.v1 - 1 && y + H > ob.v0 + 1; });
+  if (G && G.g && !G.err) {
+    const b = bboxOf(G.g.poly);
+    for (const [x, y] of [[b.u1 + T, b.v0], [b.u0, b.v1 + T], [b.u0 - T - W, b.v0], [b.u0, b.v0 - T - H]]) if (!busy(x, y)) return [Math.round(x - nb.u0), Math.round(y - nb.v0)];
+  }
+  const fb = floorBBox(); return fb ? [Math.round(fb.u1 + 1000 - nb.u0), Math.round(fb.v0 - nb.v0)] : [0, 0];
+}
+/* проёмы между приставленными комнатами: появляются сами, держатся в пределах общей стены */
+const pairKey = (a, b) => [a, b].sort().join('|');
+function doorWidthFor(span) { return span >= 1100 ? 900 : span >= 700 ? Math.round((span - 200) / 10) * 10 : Math.floor(span); }
+function syncAutoDoors(changed) {
+  const set = new Set(changed), geo = computeGeo(S), adj = adjacency(S, geo), made = [], idx = id => S.rooms.findIndex(r => r.id === id);
+  S.noDoor = S.noDoor || [];
+  for (const r of S.rooms) {
+    r.doors = (r.doors || []).filter(d => {
+      if (!d.auto || !(set.has(r.id) || (d.to && set.has(d.to)))) return true;
+      const list = adj.filter(a => a.a === r.id && a.i === (d.wall | 0)); if (!list.length) return false;
+      const mid = num(d.pos) + num(d.width) / 2, a = list.find(x => mid >= x.o0 && mid <= x.o1) || list.slice().sort((x, y) => (y.o1 - y.o0) - (x.o1 - x.o0))[0], span = a.o1 - a.o0;
+      d.to = a.b;
+      if (d.full) { d.pos = Math.round(a.o0); d.width = Math.floor(span); }
+      else { d.width = Math.min(num(d.width), Math.floor(span)); d.pos = Math.round(clamp(num(d.pos), a.o0, a.o1 - d.width)); }
+      return true;
+    });
+  }
+  for (const a of adj) {
+    if (!set.has(a.a) && !set.has(a.b)) continue;
+    const ownA = set.has(a.b) && !set.has(a.a) ? true : set.has(a.a) && !set.has(a.b) ? false : idx(a.a) < idx(a.b);
+    if (!ownA || S.noDoor.includes(pairKey(a.a, a.b))) continue;
+    const ra = room(a.a), rb = room(a.b);
+    const between = (r, o) => (r.doors || []).some(d => d.to === o);
+    if (between(ra, a.b) || between(rb, a.a)) continue;
+    if ((ra.doors || []).some(d => (d.wall | 0) === a.i && num(d.pos) < a.o1 && num(d.pos) + num(d.width) > a.o0)) continue;
+    if ((rb.doors || []).some(d => (d.wall | 0) === a.j && num(d.pos) < a.p1 && num(d.pos) + num(d.width) > a.p0)) continue;
+    const span = a.o1 - a.o0, w = doorWidthFor(span), full = w >= span - 1;
+    const d = { id: newId('d'), wall: a.i, pos: Math.round(a.o0 + (span - w) / 2), width: w, auto: true, to: a.b }; if (full) d.full = true;
+    ra.doors = ra.doors || []; ra.doors.push(d); made.push({ ra, rb, d });
+  }
+  if (!made.length) return '';
+  const m = made[made.length - 1]; UI.lastDoor = { rid: m.ra.id, id: m.d.id };
+  return 'Комнаты «' + m.ra.name + '» и «' + m.rb.name + '» соединены: ' + (m.d.full ? 'проход во всю общую стену' : 'проём ' + mm(m.d.width) + ' мм') + '. Размеры стены делятся по стыку. Под картой — «Во всю стену» или «Убрать».';
+}
+function doorFull(r, d) {
+  const geo = computeGeo(S), list = adjacency(S, geo).filter(a => a.a === r.id && a.i === (d.wall | 0)); if (!list.length) return;
+  const mid = num(d.pos) + num(d.width) / 2, a = list.find(x => mid >= x.o0 && mid <= x.o1) || list[0], span = a.o1 - a.o0;
+  if (!d.full) { d.full = true; d.pos = Math.round(a.o0); d.width = Math.floor(span); }
+  else { delete d.full; d.width = doorWidthFor(span) >= span - 1 ? Math.floor(span) : Math.min(900, doorWidthFor(span)); d.pos = Math.round(a.o0 + (span - d.width) / 2); }
+  d.to = a.b;
+}
+function removeDoor(r, d) {
+  const geo = computeGeo(S), a = adjacency(S, geo).find(x => x.a === r.id && x.i === (d.wall | 0) && num(d.pos) < x.o1 && num(d.pos) + num(d.width) > x.o0), to = d.to || (a && a.b);
+  r.doors = (r.doors || []).filter(x => x !== d);
+  if (to) { S.noDoor = S.noDoor || []; const k = pairKey(r.id, to); if (!S.noDoor.includes(k)) S.noDoor.push(k); }
+  if (UI.lastDoor && UI.lastDoor.id === d.id) UI.lastDoor = null;
+}
+function addDoorOn(r, i, t) {
+  const g = (MODEL.geo[r.id] || {}).g || roomGeom(r), c = dist(g.corners[i], g.corners[(i + 1) % g.n]);
+  const a = (MODEL.adj || []).find(x => x.a === r.id && x.i === i && (t === undefined || (t >= x.o0 - 1 && t <= x.o1 + 1)));
+  let pos, w;
+  if (a) { const span = a.o1 - a.o0; w = doorWidthFor(span); pos = a.o0 + (span - w) / 2; if (t !== undefined && span > w + 50) pos = clamp(t - w / 2, a.o0, a.o1 - w); S.noDoor = (S.noDoor || []).filter(k => k !== pairKey(r.id, a.b)); }
+  else { w = Math.min(900, Math.max(300, c - 200)); pos = t === undefined ? (c - w) / 2 : clamp(t - w / 2, 0, c - w); }
+  const d = { id: newId('d'), wall: i, pos: Math.round(pos), width: Math.round(w) }; if (a) { d.to = a.b; d.auto = true; if (w >= a.o1 - a.o0 - 1) d.full = true; }
+  r.doors = r.doors || []; r.doors.push(d); UI.lastDoor = { rid: r.id, id: d.id }; return d;
+}
+function setArc(r, i, on) {
+  const w = r.walls[i]; if (!w) return;
+  if (on) { if (Math.abs(num(w.arc)) < 0.5) w.arc = Math.round(num(w.len) * 0.12 / 10) * 10 || 100; r.doors = (r.doors || []).filter(d => (d.wall | 0) !== i); r.niches = (r.niches || []).filter(x => (x.wall | 0) !== i); }
+  else w.arc = 0;
+}
+/* разделить прямую стену в точке t: появляется угол 180°, его можно тянуть */
+function splitWall(r, i, t) {
+  const w = r.walls[i]; if (!w) return; const c = num(w.len);
+  r.walls.splice(i, 1, { len: t, turn: w.turn, arc: 0 }, { len: c - t, turn: 0, arc: 0 });
+  const fix = list => (list || []).map(d => { if (d.wall > i) d.wall++; else if (d.wall === i && num(d.pos) >= t - 1) { d.wall = i + 1; d.pos = Math.max(0, num(d.pos) - t); } return d; });
+  r.doors = fix(r.doors); r.niches = fix(r.niches);
+}
+function focusLast(sec) { setTimeout(() => { const list = $$('details[data-acc="' + sec + '"] .orow'), el = list[list.length - 1]; if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, 60); }
+const NICHE_PRESET = { radiator: { kind: 'niche', width: 1200, depth: 120, name: 'под батарею' }, wardrobe: { kind: 'niche', width: 1500, depth: 600, name: 'под шкаф' }, box: { kind: 'box', width: 400, depth: 300, name: 'короб' } };
+function addNicheOn(r, i, t, preset) {
+  const g = (MODEL.geo[r.id] || {}).g || roomGeom(r), c = dist(g.corners[i], g.corners[(i + 1) % g.n]), p = NICHE_PRESET[preset] || NICHE_PRESET.radiator;
+  const width = Math.min(p.width, Math.max(100, Math.round(c - 100))); let pos;
+  if (t === undefined) pos = p.kind === 'box' ? 0 : (c - width) / 2;
+  else { pos = clamp(t - width / 2, 0, c - width); if (p.kind === 'box') { if (t < 600) pos = 0; else if (c - t < 600) pos = c - width; } }
+  const x = { id: newId('n'), kind: p.kind, wall: i, pos: Math.round(pos), width, depth: p.depth, floor: true, name: p.name };
+  r.niches = r.niches || []; r.niches.push(x); return x;
+}
 
 /* ================= действия (клики) ================= */
 const ACT = {
-  'help-close': () => { UI.help = false; $('#helpBox').hidden = true; saveUI(); },
-  'room-select': b => { UI.room = b.dataset.room; UI.delArm = null; UI.wallFocus = -1; renderPlanTab(); draw(); saveUI(); },
-  'room-add-open': () => { UI.addRoom = !UI.addRoom; $('#addRoomBox').hidden = !UI.addRoom; },
+  'go': b => setTab(b.dataset.v),
+  'room-select': b => { UI.room = b.dataset.room; UI.delArm = null; UI.wallFocus = -1; UI.wall = null; UI.lastDoor = null; renderPlanTab(); renderCtxbar(); draw(); saveUI(); },
+  'room-add-open': () => { UI.addRoom = !UI.addRoom; $('#addRoomBox').hidden = !UI.addRoom; renderRoomList(); if (UI.addRoom) { const el = $('#newL'); if (el) el.focus(); } },
   'room-add-rect': () => { const L = num($('#newL').value), W = num($('#newW').value); if (!(L >= 300 && W >= 300)) { say('Впишите длину и ширину новой комнаты в миллиметрах.', 'bad'); return; } addRoom(rectWalls(L, W), 'Комната ' + (S.rooms.length + 1)); },
   'room-add-tpl': b => { const t = TEMPLATES.find(x => x.id === b.dataset.tpl); if (t) addRoom(t.make(), t.name); },
-  'room-dup': () => { const r = curRoom(), c = deep(r), b = floorBBox(), rb = bboxOf(roomGeom(r).poly); c.id = newId('r'); c.name = r.name + ' (копия)'; c.x0 = Math.round((b ? b.u1 : rb.u1) + 1000 + (num(r.x0) - rb.u0)); c.y0 = Math.round(num(r.y0) + ((b ? b.v0 : rb.v0) - rb.v0)); c.doors = []; S.rooms.push(c); UI.room = c.id; view.fitted = false; afterRooms('Копия добавлена справа.'); fitView(); draw(); },
-  'room-rot': () => { rotateRoomBy(curRoom(), 90); afterRooms('Комната повёрнута на 90° по часовой стрелке.'); },
-  'room-rotl': () => { rotateRoomBy(curRoom(), -90); afterRooms('Комната повёрнута на 90° против часовой стрелки.'); },
-  'room-rotr': () => { rotateRoomBy(curRoom(), 90); afterRooms('Комната повёрнута на 90° по часовой стрелке.'); },
-  'add-start': () => { UI.addTpl = 'rect'; renderCtxbar(); draw(); say('Нажмите на карту, где поставить комнату, или нарисуйте прямоугольник пальцем.', null, true); },
+  'room-dup': () => { const r = curRoom(), c = deep(r); c.id = newId('r'); c.name = r.name + ' (копия)'; c.doors = []; [c.x0, c.y0] = placeAttached(c.walls, c.a0); S.rooms.push(c); UI.room = c.id; UI.wall = null; const msg = syncAutoDoors([c.id]); view.fitted = false; afterRooms(msg || 'Копия добавлена рядом.'); fitView(); draw(); },
+  'room-rot': () => ACT['room-rotr'](),
+  'room-rotr': () => { const r = curRoom(); rotateRoomBy(r, 90); const msg = syncAutoDoors([r.id]); afterRooms(msg || 'Комната повёрнута на 90° по часовой стрелке.'); },
+  'add-start': () => { UI.addTpl = 'rect'; UI.wall = null; UI.lastDoor = null; renderCtxbar(); draw(); say('Нажмите на карту, где поставить комнату, или нарисуйте прямоугольник пальцем. У соседней стены комната прилипнет, и появится проём.', null, true); },
   'add-tpl': b => { UI.addTpl = b.dataset.tpl; renderCtxbar(); say('Нажмите на карту, где поставить «' + (TEMPLATES.find(t => t.id === b.dataset.tpl) || {}).name + '».', null, true); },
   'add-cancel': () => { UI.addTpl = null; UI.addPrev = null; renderCtxbar(); modeHint(); draw(); },
   'rot-step': b => { const c = dirCtx(UI.target); if (!c) return; const P = curP(); setDirection(P, fullAngle(P) + num(b.dataset.v), c); clearVariants(); syncPatInputs(); syncPatternUI(); renderCtxbar(); invalidate({ fast: true }); say('Угол к опорной стене: ' + f1(shownAngle(P)) + '°.'); },
-  'room-del': () => { const r = curRoom(); if (UI.delArm !== 'room:' + r.id) { UI.delArm = 'room:' + r.id; renderRoomEditor(); renderCtxbar(); return; } S.rooms = S.rooms.filter(x => x.id !== r.id); UI.delArm = null; UI.room = S.rooms[0].id; afterRooms('Комната удалена.'); },
-  'room-rect': () => { const L = num($('#rL').value), W = num($('#rW').value); if (!(L >= 300 && W >= 300)) { say('Впишите длину и ширину в миллиметрах.', 'bad'); return; } const r = curRoom(); r.walls = rectWalls(L, W); r.doors = (r.doors || []).filter(d => d.wall < 4); afterRooms(); },
-  'room-tpl': b => { const t = TEMPLATES.find(x => x.id === b.dataset.tpl); if (!t) return; const r = curRoom(); r.walls = t.make(); r.doors = []; afterRooms('Форма «' + t.name + '»: поправьте длины стен под свою комнату.'); },
-  'wall-shape': b => { const r = curRoom(), w = r.walls[+b.dataset.w]; if (!w) return; if (b.dataset.v === 'arc') { if (Math.abs(num(w.arc)) < 0.5) w.arc = Math.round(num(w.len) * 0.12 / 10) * 10 || 100; r.doors = (r.doors || []).filter(d => d.wall !== +b.dataset.w); } else w.arc = 0; UI.wallFocus = +b.dataset.w; renderRoomEditor(); invalidate({ fast: true }); },
+  'room-del': () => { const r = curRoom(); if (UI.delArm !== 'room:' + r.id) { UI.delArm = 'room:' + r.id; renderRoomEditor(); renderCtxbar(); return; } S.rooms = S.rooms.filter(x => x.id !== r.id); for (const o of S.rooms) o.doors = (o.doors || []).filter(d => d.to !== r.id || !d.auto); UI.delArm = null; UI.wall = null; UI.lastDoor = null; UI.room = S.rooms[0].id; afterRooms('Комната удалена.'); },
+  'room-rect': () => { const L = num($('#rL').value), W = num($('#rW').value); if (!(L >= 300 && W >= 300)) { say('Впишите длину и ширину в миллиметрах.', 'bad'); return; } const r = curRoom(); r.walls = rectWalls(L, W); r.doors = (r.doors || []).filter(d => d.wall < 4); r.niches = (r.niches || []).filter(x => x.wall < 4); const msg = syncAutoDoors([r.id]); afterRooms(msg); },
+  'room-tpl': b => { const t = TEMPLATES.find(x => x.id === b.dataset.tpl); if (!t) return; const r = curRoom(); r.walls = t.make(); r.doors = []; r.niches = []; UI.wall = null; const msg = syncAutoDoors([r.id]); afterRooms(msg || 'Форма «' + t.name + '»: поправьте длины стен под свою комнату.'); },
+  'wall-shape': b => { setArc(curRoom(), +b.dataset.w, b.dataset.v === 'arc'); UI.wallFocus = +b.dataset.w; renderRoomEditor(); renderCtxbar(); invalidate({ fast: true }); },
   'wall-side': b => { const w = curRoom().walls[+b.dataset.w]; if (!w) return; w.arc = (b.dataset.v === 'in' ? -1 : 1) * Math.abs(num(w.arc)); renderRoomEditor(); invalidate({ fast: true }); },
-  'wall-split': b => { const r = curRoom(), i = +b.dataset.w, w = r.walls[i]; if (!w || Math.abs(num(w.arc)) >= 0.5) return; r.walls.splice(i, 1, { len: num(w.len) / 2, turn: w.turn, arc: 0 }, { len: num(w.len) / 2, turn: 0, arc: 0 }); r.doors = (r.doors || []).map(d => d.wall > i ? Object.assign(d, { wall: d.wall + 1 }) : d); UI.wallFocus = i + 1; renderRoomEditor(); invalidate({ fast: true }); say('Стена разделена. Впишите новые длины и угол между частями.'); },
-  'wall-del': b => { const r = curRoom(), i = +b.dataset.w; if (r.walls.length <= 2) return; r.walls.splice(i, 1); if (i === 0 && r.walls[0]) r.walls[0].turn = 0; r.doors = (r.doors || []).filter(d => d.wall !== i).map(d => d.wall > i ? Object.assign(d, { wall: d.wall - 1 }) : d); renderRoomEditor(); invalidate({ fast: true }); },
-  'wall-add': () => { const r = curRoom(); r.walls.push({ len: 1000, turn: 90, arc: 0 }); UI.wallFocus = r.walls.length - 1; renderRoomEditor(); invalidate({ fast: true }); const el = $('#w' + (r.walls.length - 1) + 'len'); if (el) { el.focus(); el.select(); } },
+  'wall-split': b => { const r = curRoom(), i = +b.dataset.w, w = r.walls[i]; if (!w || Math.abs(num(w.arc)) >= 0.5) return; splitWall(r, i, num(w.len) / 2); UI.wallFocus = i + 1; renderRoomEditor(); invalidate({ fast: true }); say('Стена разделена. Впишите новые длины и угол между частями.'); },
+  'wall-del': b => { const r = curRoom(), i = +b.dataset.w; if (r.walls.length <= 2) return; r.walls.splice(i, 1); if (i === 0 && r.walls[0]) r.walls[0].turn = 0; const fix = list => (list || []).filter(d => (d.wall | 0) !== i).map(d => d.wall > i ? Object.assign(d, { wall: d.wall - 1 }) : d); r.doors = fix(r.doors); r.niches = fix(r.niches); UI.wall = null; renderRoomEditor(); renderCtxbar(); invalidate({ fast: true }); },
+  'wall-add': () => { const r = curRoom(); r.walls.push({ len: 1000, turn: 90, arc: 0 }); UI.wallFocus = r.walls.length - 1; UI.open.walls = true; renderRoomEditor(); invalidate({ fast: true }); const el = $('#w' + (r.walls.length - 1) + 'len'); if (el) { el.focus(); el.select(); } },
   'corner-set': b => { const r = curRoom(), w = r.walls[+b.dataset.w]; if (!w) return; w.turn = 180 - num(b.dataset.v); renderRoomEditor(); invalidate({ fast: true }); },
   'close-auto': () => { const r = curRoom(), g = roomGeom(r); Object.assign(r, wallsFromCorners(g.corners, g.arcs)); renderRoomEditor(); invalidate({ fast: true }); },
-  'door-add': () => { const r = curRoom(), g = roomGeom(r); let wi = -1, best = 0; for (let i = 0; i < g.n; i++) { const c = dist(g.corners[i], g.corners[(i + 1) % g.n]); if (Math.abs(g.arcs[i]) < 0.5 && c > best && c > 1000) { best = c; wi = i; } } if (wi < 0) { say('Нужна прямая стена длиннее метра.', 'bad'); return; } r.doors = r.doors || []; r.doors.push({ id: newId('d'), wall: wi, pos: Math.round((best - 900) / 2), width: 900 }); renderRoomEditor(); invalidate({ fast: true }); say('Проём добавлен на стену ' + (wi + 1) + '. Поставьте соседнюю комнату вплотную — рисунок пройдёт через проём.'); },
-  'door-del': b => { curRoom().doors.splice(+b.dataset.d, 1); renderRoomEditor(); invalidate({ fast: true }); },
-  'own-set': b => { const r = curRoom(); r.own = b.dataset.v === '1'; if (r.own) { r.pat = Object.assign(deep(S.floorPat), { refRoom: r.id, refWall: 0 }); UI.target = 'room:' + r.id; } afterRooms(r.own ? 'У комнаты «' + r.name + '» теперь свой рисунок — настройте его на шаге 3.' : 'Комната снова в общем рисунке.'); if (r.own) { recomputeNow(); centerTarget(UI.target, true); invalidate({ fast: true }); } },
+  // стена, выбранная на карте
+  'wall-back': () => { UI.wall = null; renderCtxbar(); draw(); modeHint(); },
+  'wall-door': () => { const W = wallOk(); if (!W) return; const d = addDoorOn(W.r, W.i, W.t); UI.open.doors = true; UI.wall = null; afterRooms((d.full ? 'Проход во всю общую стену' : 'Проём ' + mm(d.width) + ' мм') + ' на стене ' + (W.i + 1) + (d.to ? ' в «' + roomName(d.to) + '»' : '') + '. Точное место и ширина — в разделе «Проёмы».'); },
+  'wall-niche': () => { const W = wallOk(); if (!W) return; const x = addNicheOn(W.r, W.i, W.t, 'radiator'); UI.open.niches = true; afterRooms('Ниша ' + mm(x.width) + '×' + mm(x.depth) + ' мм на стене ' + (W.i + 1) + '. Размеры, «под шкаф» и пол в нише — в разделе «Ниши и выступы».'); focusLast('niches'); },
+  'wall-box': () => { const W = wallOk(); if (!W) return; const x = addNicheOn(W.r, W.i, W.t, 'box'); UI.open.niches = true; afterRooms('Выступ ' + mm(x.width) + '×' + mm(x.depth) + ' мм на стене ' + (W.i + 1) + (x.pos === 0 ? ', в углу' : '') + '. Размеры — в разделе «Ниши и выступы».'); focusLast('niches'); },
+  'wall-arc': () => { const W = wallOk(); if (!W) return; setArc(W.r, W.i, Math.abs(W.g.arcs[W.i]) < 0.5); afterRooms(Math.abs(num(W.r.walls[W.i].arc)) >= 0.5 ? 'Стена ' + (W.i + 1) + ' — дуга. Тяните ромб на стене или впишите прогиб в разделе «Стены».' : 'Стена ' + (W.i + 1) + ' снова прямая.'); },
+  'wall-cut': () => { const W = wallOk(); if (!W) return; const c = num(W.r.walls[W.i] && W.r.walls[W.i].len), t = Math.round(clamp(W.t, 100, c - 100) / 10) * 10; if (!(c > 300)) return; splitWall(W.r, W.i, t); UI.wall = null; UI.open.walls = true; UI.wallFocus = W.i + 1; afterRooms('Стена разделена: ' + mm(t) + ' + ' + mm(c - t) + ' мм. Тяните новый угол на карте или впишите угол в разделе «Стены».'); },
+  'door-full': b => { const ref = b.dataset.d !== undefined ? { r: curRoom(), d: curRoom().doors[+b.dataset.d] } : doorRef(UI.lastDoor); if (!ref || !ref.d) return; doorFull(ref.r, ref.d); ref.d.auto = true; afterRooms(ref.d.full ? 'Проход во всю общую стену: ' + mm(ref.d.width) + ' мм. Стена считается до угла соседней комнаты.' : 'Обычный проём ' + mm(ref.d.width) + ' мм по центру общей стены.'); },
+  'door-remove': () => { const ref = doorRef(UI.lastDoor); if (!ref) return; removeDoor(ref.r, ref.d); afterRooms('Проём убран. Стена между комнатами глухая — рисунок в соседнюю комнату не идёт.'); },
+  'door-add': () => { const r = curRoom(), g = roomGeom(r); let wi = UI.wallFocus >= 0 && UI.wallFocus < g.n && Math.abs(g.arcs[UI.wallFocus]) < 0.5 ? UI.wallFocus : -1; if (wi < 0) { const a = (MODEL.adj || []).find(x => x.a === r.id); if (a) wi = a.i; } if (wi < 0) { let best = 0; for (let i = 0; i < g.n; i++) { const c = dist(g.corners[i], g.corners[(i + 1) % g.n]); if (Math.abs(g.arcs[i]) < 0.5 && c > best && c > 600) { best = c; wi = i; } } } if (wi < 0) { say('Нужна прямая стена длиннее 600 мм.', 'bad'); return; } const d = addDoorOn(r, wi); afterRooms('Проём ' + mm(d.width) + ' мм на стене ' + (wi + 1) + (d.to ? ' в «' + roomName(d.to) + '»' : '. Поставьте соседнюю комнату вплотную — рисунок пройдёт через проём.')); },
+  'door-del': b => { const r = curRoom(), d = r.doors[+b.dataset.d]; if (!d) return; removeDoor(r, d); afterRooms('Проём удалён.'); },
+  'niche-add': b => { const r = curRoom(), g = roomGeom(r); let wi = UI.wallFocus >= 0 && UI.wallFocus < g.n && Math.abs(g.arcs[UI.wallFocus]) < 0.5 ? UI.wallFocus : -1; if (wi < 0) for (let i = 0; i < g.n; i++) if (Math.abs(g.arcs[i]) < 0.5 && !(MODEL.adj || []).some(a => a.a === r.id && a.i === i)) { wi = i; break; } if (wi < 0) wi = 0; const x = addNicheOn(r, wi, undefined, b.dataset.v); afterRooms((x.kind === 'box' ? 'Выступ' : 'Ниша') + ' ' + mm(x.width) + '×' + mm(x.depth) + ' мм на стене ' + (wi + 1) + '. Поправьте стену и «от угла».'); focusLast('niches'); },
+  'niche-del': b => { const r = curRoom(); r.niches.splice(+b.dataset.n, 1); afterRooms('Удалено.'); },
+  'niche-kind': b => { const x = curRoom().niches[+b.dataset.n]; if (!x) return; x.kind = b.dataset.v; renderRoomEditor(); invalidate({ fast: true }); },
+  'own-set': b => { const r = curRoom(); r.own = b.dataset.v === '1'; if (r.own) { r.pat = Object.assign(deep(S.floorPat), { refRoom: r.id, refWall: 0 }); UI.target = 'room:' + r.id; } afterRooms(r.own ? 'У комнаты «' + r.name + '» теперь свой рисунок — настройте его на шаге «Рисунок».' : 'Комната снова в общем рисунке.'); if (r.own) { recomputeNow(); centerTarget(UI.target, true); invalidate({ fast: true }); } },
   // покрытие
   'mat-target': b => { UI.matTarget = b.dataset.key; const m = curMat(false); if (m && m.cat) UI.catView = m.cat; renderMatTab(); },
   'cat': b => { UI.catView = b.dataset.cat; renderCats(); renderSizes(); },
@@ -984,7 +1322,7 @@ const ACT = {
   // расчёт
   'res-target': b => { UI.target = b.dataset.key; renderResults(); renderStatus(); draw(); },
   'grp': b => { const key = b.dataset.key, gk = b.dataset.gk; UI.hl = UI.hl && UI.hl.gk === gk && UI.hl.key === key ? null : { key, gk }; $$('.grp').forEach(x => x.setAttribute('aria-pressed', String(!!UI.hl && x.dataset.gk === UI.hl.gk && x.dataset.key === UI.hl.key))); draw(); },
-  'export-img': () => exportImage(), 'export-copy': () => copyReport(), 'export-file': () => exportProject(),
+  'export-img': () => exportImage(), 'export-copy': () => copyReport(), 'export-file': () => exportProject(), 'export-share': () => shareReport(),
   'install': () => { if (!deferredPrompt) return; deferredPrompt.prompt(); deferredPrompt.userChoice.then(c => { if (c && c.outcome === 'accepted') { UI.installOff = true; saveUI(); } deferredPrompt = null; renderInstall(); }).catch(() => {}); },
   'install-off': () => { UI.installOff = true; saveUI(); renderInstall(); },
   'piece-close': () => { UI.sel = null; UI.hl = null; renderPieceInfo(); draw(); },
@@ -993,8 +1331,9 @@ const ACT = {
 $('.app').addEventListener('click', e => { const b = e.target.closest('[data-act]'); if (!b || b.disabled) return; const f = ACT[b.dataset.act]; if (f) f(b); });
 document.addEventListener('focusin', e => { const c = e.target.closest && e.target.closest('.wcard'); if (c) { const i = +c.dataset.wi; if (i !== UI.wallFocus) { UI.wallFocus = i; $$('.wcard').forEach(x => x.classList.toggle('sel', +x.dataset.wi === i)); } } });
 function addRoom(walls, name) {
-  const [x, y] = placeNewRoom(), r = newRoom(name, walls, x, y); S.rooms.push(r); UI.room = r.id; UI.addRoom = false;
-  view.fitted = false; afterRooms('Комната «' + name + '» добавлена справа. Подвиньте её к соседней в режиме «Комнаты» и добавьте проём.'); recomputeNow(); fitView(); draw();
+  const [x, y] = placeAttached(walls, 0), r = newRoom(name, walls, x, y); S.rooms.push(r); UI.room = r.id; UI.addRoom = false; UI.wall = null;
+  const msg = syncAutoDoors([r.id]);
+  view.fitted = false; afterRooms(msg || 'Комната «' + name + '» добавлена. Тяните её на карте к соседней — прилипнет, и появится проём.'); recomputeNow(); fitView(); draw();
 }
 function afterRooms(msg) { recomputeNow(); renderPlanTab(); renderCtxbar(); if (UI.tab === 'pat') renderPatTab(); if (UI.tab === 'mat') renderMatTab(); invalidate({ fast: true }); if (msg) say(msg); }
 
@@ -1007,7 +1346,7 @@ function renderMatTab() {
   $('#matUseMainFld').hidden = UI.matTarget === 'main'; $('#matUseMain').checked = useMain;
   $('#matEditor').hidden = useMain;
   $('#matTargetNote').textContent = UI.matTarget === 'main' ? (keys.length > 1 ? 'Основное покрытие — для общего рисунка. Рамку, вставки и комнаты со своим рисунком можно сделать из другого покрытия.' : 'Покрытие для всего этажа.') : useMain ? 'Используется основное покрытие. Снимите галочку, чтобы выбрать другое.' : 'Своё покрытие для «' + matKeyName(UI.matTarget) + '».';
-  renderCats(); renderSizes(); renderTones(); syncInputs();
+  renderCats(); renderSizes(); renderTones(); syncInputs(); renderSums();
 }
 $('#matUseMain').addEventListener('change', e => { const h = matHolder(UI.matTarget); if (!h) return; h.mat = e.target.checked ? null : deep(S.mat); renderMatTab(); invalidate({ fast: true }); });
 function renderCats() { $('#catChips').innerHTML = CATS.map(c => '<button class="chip" type="button" data-act="cat" data-cat="' + c.id + '" aria-pressed="' + (UI.catView === c.id) + '">' + esc(c.name) + '</button>').join(''); }
@@ -1167,10 +1506,12 @@ function centerTarget(key, quiet) {
 }
 let optimizing = false;
 async function optimize() {
-  if (optimizing || !MODEL) return; const btn = $('#btnOptimize'), key = UI.target, geo = MODEL.geo;
+  if (optimizing || !MODEL) return; const key = UI.target, geo = MODEL.geo;
+  // кнопка «Подобрать» есть и в панели, и под картой
+  const optBtns = (dis, txt) => $$('[data-act="optimize"]').forEach(b => { b.disabled = dis; if (txt) b.textContent = txt; });
   const u0 = buildUnit(key, S, geo); if (!u0) return;
   const base = computeUnit(u0, true); if (base.err) { say(base.err, 'bad'); return; }
-  optimizing = true; btn.disabled = true;
+  optimizing = true; optBtns(true);
   const P = u0.P, pd = patDef(P.type), M = u0.mat, F = u0.parts[0].frame, kind = u0.kind;
   const keep = !!P.keepCenter && (pd.group === 'herring' || pd.group === 'chevron') && kind !== 'border';
   let pu, pv;
@@ -1185,7 +1526,7 @@ async function optimize() {
   const at = (du, dv) => { if (kind === 'border') return [A0 + du, 0]; const w = F.vecW([du, dv]); return [A0 + w[0] * F.e1[0] + w[1] * F.e1[1], B0 + w[0] * F.e2[0] + w[1] * F.e2[1]]; };
   const evalAt = (du, dv) => { const o = at(du, dv); P.offA = o[0]; P.offB = o[1]; const r = computeUnit(buildUnit(key, S, geo), true); const v = { s: r.err ? Infinity : r.score, du, dv, bad: r.bad, minT: r.minT, cuts: r.cuts, offA: Math.round(o[0]), offB: Math.round(o[1]) }; seen.push(v); return v; };
   const starts = 6, levels = 3, total = Nu * Nv + starts * levels * 24; let cnt = 0;
-  const tick = async () => { if (++cnt % 6 === 0) { btn.textContent = 'Подбираю… ' + Math.min(99, Math.round(cnt / total * 100)) + '%'; await new Promise(r => setTimeout(r, 0)); } };
+  const tick = async () => { if (++cnt % 6 === 0) { optBtns(true, 'Подбираю… ' + Math.min(99, Math.round(cnt / total * 100)) + '%'); await new Promise(r => setTimeout(r, 0)); } };
   const coarse = [evalAt(0, 0)];
   for (let i = 0; i < Nu; i++) for (let j = 0; j < Nv; j++) { if (!i && !j) continue; coarse.push(evalAt(i / Nu * pu, j / Nv * pv)); await tick(); }
   coarse.sort((x, y) => x.s - y.s);
@@ -1210,7 +1551,7 @@ async function optimize() {
   const best = list[0] || { offA: A0, offB: B0 };
   P.offA = best.offA; P.offB = best.offB;
   UI.variants = { key, list, cur: 0 };
-  btn.textContent = 'Подобрать варианты'; btn.disabled = false; optimizing = false;
+  optBtns(false); optimizing = false; $('#btnOptimize').textContent = 'Подобрать варианты'; renderCtxbar();
   syncPatInputs(); renderVariants(); recompute(); invalidate({ fast: true });
   const st = MODEL.byKey[key] && MODEL.byKey[key].stats;
   if (st && st.nBad) say('Вариант 1 применён: узких подрезок ' + st.nBad + '.' + (keep ? ' Снимите галочку «Только симметричные варианты» — без неё вариантов больше.' : ' Можно уменьшить порог в «Правилах» или сменить направление.'), 'bad');
@@ -1307,9 +1648,10 @@ function renderResults() {
     h += '<div class="sec"><h3>Что приходит к стенам</h3><div class="tblwrap"><table class="tbl"><thead><tr><th>Стена</th><th>Подрезок</th><th>Глубина куска</th><th>Самый узкий</th></tr></thead><tbody>';
     for (const w of res.walls) {
       const name = (w.label === 'стена' ? '' : 'рамка ') + (w.i + 1) + (multi ? ' ' + roomName(w.rid) : '') + ' · ' + (w.arc ? '⌒' : '') + mm(w.len);
-      if (!w.count) { h += '<tr><td class="n">' + esc(name) + '</td><td class="n">0</td><td colspan="2">целые планки</td></tr>'; continue; }
+      const js = (MODEL.adj || []).filter(a => a.a === w.rid && a.i === w.i), jt = js.length ? '<br><small class="hint">' + esc(jointSegs(w.len, js).map(sg => mm(sg.len) + (sg.to ? ' общая с «' + roomName(sg.to) + '»' : '')).join(' + ')) + '</small>' : '';
+      if (!w.count) { h += '<tr><td class="n">' + esc(name) + jt + '</td><td class="n">0</td><td colspan="2">целые планки</td></tr>'; continue; }
       const bad = w.minT < thr;
-      h += '<tr class="' + (bad ? 'bad' : '') + '"><td class="n">' + esc(name) + '</td><td class="n">' + w.count + '</td><td class="n">' + (Math.abs(w.maxD - w.minD) < 1 ? mm(w.minD) : mm(w.minD) + '–' + mm(w.maxD)) + ' мм</td><td class="n">' + mm(w.minT) + ' мм' + (bad ? ' ⚠' : '') + '</td></tr>';
+      h += '<tr class="' + (bad ? 'bad' : '') + '"><td class="n">' + esc(name) + jt + '</td><td class="n">' + w.count + '</td><td class="n">' + (Math.abs(w.maxD - w.minD) < 1 ? mm(w.minD) : mm(w.minD) + '–' + mm(w.maxD)) + ' мм</td><td class="n">' + mm(w.minT) + ' мм' + (bad ? ' ⚠' : '') + '</td></tr>';
     }
     h += '</tbody></table></div><p class="note">Глубина — насколько кусок заходит от края укладки. «Самый узкий» — ширина самого тонкого куска у этой стены.</p></div>';
   }
@@ -1332,13 +1674,21 @@ function renderResults() {
       (res.groups.length > list.length ? '<p class="note">Ещё ' + (res.groups.length - list.length) + ' разных подрезок — смотрите на карте.</p>' : '') + '<p class="note">Нажмите на строку — такие куски подсветятся на плане.</p></div>';
   }
   h += '<div class="sec"><h3>Обозначения</h3><div class="legend"><span><i style="background:' + rgb((TONES[res.unit.mat.tone] || TONES.oak).c) + '"></i>целая</span><span><i style="background:' + COL.tape + '"></i>подрезка</span><span><i style="background:' + COL.badSoft + ';border-color:' + COL.bad + '"></i>узкая подрезка</span><span><i style="background:' + COL.chalk + ';height:3px"></i>линия разметки</span><span><i style="background:' + COL.gap + '"></i>зазор у стен</span></div></div>';
-  h += '<div class="sec"><h3>Сохранить и отправить</h3><div class="row-btns"><button class="btn" type="button" data-act="export-img">Картинка плана</button><button class="btn" type="button" data-act="export-copy">Скопировать расчёт</button><button class="btn" type="button" data-act="export-file">Файл проекта</button><a class="btn" id="tgShare" href="' + esc(tgShareLink()) + '" target="_blank" rel="noopener">Отправить в Telegram</a></div></div>';
+  h += '<div class="sec"><h3>Сохранить и отправить</h3><div class="row-btns"><button class="btn primary" type="button" data-act="export-img">' + ICON.img + 'Картинка плана</button><button class="btn" type="button" data-act="export-share">' + ICON.share + (PF.inTG ? 'Отправить в чат' : 'Отправить расчёт') + '</button><button class="btn" type="button" data-act="export-copy">Скопировать расчёт</button><button class="btn" type="button" data-act="export-file">Файл проекта</button>' +
+    (PF.inTG ? '' : '<a class="btn" id="tgShare" href="' + esc(tgShareLink()) + '" target="_blank" rel="noopener">В Telegram</a>') + '</div>' +
+    (isPhone() ? '<p class="note">Картинка откроется в окне: нажмите «' + (PF.ios ? 'Сохранить в Фото' : 'Сохранить') + '» или удерживайте её пальцем.</p>' : '') + '</div>';
   el.innerHTML = h;
 }
 function reportText() {
   if (!MODEL) return '';
   const strip = s => s.replace(/<[^>]+>/g, ''), lines = [S.name || 'Раскладка'], reserve = Math.max(0, num(S.set.reserve));
-  for (const r of S.rooms) { const G = MODEL.geo[r.id]; if (G.err) { lines.push(r.name + ': ' + G.err); continue; } lines.push(r.name + ': ' + fm2(Math.abs(area(G.g.poly))) + ' м², стены ' + G.g.corners.map((p, i) => (i + 1) + ') ' + (Math.abs(G.g.arcs[i]) >= 0.5 ? 'дуга ' : '') + mm(dist(p, G.g.corners[(i + 1) % G.g.n]))).join(', ') + ' мм'); }
+  for (const r of S.rooms) {
+    const G = MODEL.geo[r.id]; if (G.err) { lines.push(r.name + ': ' + G.err); continue; }
+    const wl = G.g.corners.map((p, i) => { const c = dist(p, G.g.corners[(i + 1) % G.g.n]), js = (MODEL.adj || []).filter(a => a.a === r.id && a.i === i); return (i + 1) + ') ' + (Math.abs(G.g.arcs[i]) >= 0.5 ? 'дуга ' : '') + mm(c) + (js.length ? ' (' + jointSegs(c, js).map(sg => mm(sg.len) + (sg.to ? ' общая с «' + roomName(sg.to) + '»' : '')).join(' + ') + ')' : ''); });
+    lines.push(r.name + ': ' + fm2(Math.abs(area(G.g.poly))) + ' м², стены ' + wl.join(', ') + ' мм');
+    if ((r.doors || []).length) lines.push('  проёмы: ' + r.doors.map(d => 'ст. ' + ((d.wall | 0) + 1) + ' — ' + mm(d.width) + ' мм от угла ' + mm(d.pos) + (d.to && room(d.to) ? ' в «' + roomName(d.to) + '»' : '')).join('; '));
+    if ((r.niches || []).length) lines.push('  ниши и выступы: ' + r.niches.map(x => (x.kind === 'box' ? 'выступ ' : 'ниша ') + mm(x.width) + '×' + mm(x.depth) + ' на ст. ' + ((x.wall | 0) + 1) + ' от угла ' + mm(x.pos) + (x.kind !== 'box' && x.floor === false ? ', без пола' : '')).join('; '));
+  }
   lines.push('', 'Покупать:');
   for (const m of MODEL.mats) lines.push('— ' + catById(m.M.cat).name + ' ' + mm(m.M.L) + '×' + mm(m.M.W) + ': ' + m.boards + ' шт, с запасом ' + f1(reserve) + '% — ' + Math.ceil(m.boards * (1 + reserve / 100)) + ' шт');
   for (const res of MODEL.units) {
@@ -1357,18 +1707,36 @@ async function copyReport() {
 }
 
 /* ================= экспорт ================= */
-const fileSafe = s => (String(s || 'raskladka').replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 60) || 'raskladka');
+const fileSafe = s => (String(s || 'raskladka').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60) || 'raskladka');
+/* телефон, ярлык на экране или Telegram: файл не «скачивается», а уходит в системное меню «Поделиться» */
+function isPhone() { let coarse = false; try { coarse = window.matchMedia('(pointer:coarse)').matches && navigator.maxTouchPoints > 0; } catch (e) { coarse = false; } return PF.ios || PF.android || PF.inTG || PF.standalone || coarse; }
+function canShareFiles(files) { try { return !!(navigator.share && navigator.canShare && navigator.canShare({ files })); } catch (e) { return false; } }
 async function saveFile(name, data, mime) {
   const dl = await capUse('downloads');
   if (dl) { try { await dl.save({ filename: name, data }); return 'saved'; } catch (e) { if (e && e.code === 'declined') return 'declined'; } }
+  if (isPhone()) return 'sheet';
   let top = false; try { top = window.top === window.self; } catch (e) { top = false; }
-  if (top && !window.claude && !PF.inTG) {
+  if (top && !window.claude) {
     try { const blob = data instanceof Blob ? data : new Blob([data], { type: mime }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000); return 'saved'; } catch (e) { /* ниже — окно */ }
   }
   return 'fallback';
 }
-async function exportImage() {
-  if (!MODEL) return; const b = floorBBox(); if (!b) return;
+/* окно с файлом: кнопка «Поделиться» вызывает меню системы прямо по нажатию — так iPhone разрешает сохранить в Фото и Файлы */
+let SHARE = null, SHARE_URL = null;
+function openShareSheet(title, files, bodyHtml, note) {
+  SHARE = files && canShareFiles(files) ? files : null;
+  const img = files && files[0] && /^image\//.test(files[0].type);
+  openModal('<header><h2>' + esc(title) + '</h2><button class="icon" data-close type="button" aria-label="Закрыть">' + ICON.del + '</button></header>' +
+    (SHARE ? '<button class="btn primary next" data-share-file type="button"><span>' + (img ? (PF.ios ? 'Сохранить в Фото или отправить' : 'Сохранить или отправить') : (PF.ios ? 'Сохранить в Файлы или отправить' : 'Сохранить или отправить')) + '</span>' + ICON.share + '</button>' : '') +
+    '<p class="note">' + note + '</p>' + bodyHtml, 'share');
+}
+function shareNow() {
+  if (!SHARE) return;
+  navigator.share({ files: SHARE, title: S.name || 'Раскладка' }).then(() => { closeModal(); say('Готово.', 'ok'); PF.haptic('ok'); })
+    .catch(err => { if (err && err.name === 'AbortError') return; say(PF.ios ? 'Меню «Поделиться» не открылось. Нажмите и удерживайте картинку → «Сохранить в Фото».' : 'Не получилось поделиться. Нажмите и удерживайте картинку, чтобы сохранить.', 'bad'); });
+}
+function planCanvas() {
+  const b = floorBBox(); if (!b) return null;
   const K = 2, W = 1000, head = 92, foot = 40, pad = 56, s = (W - 2 * pad) / Math.max(1, b.u1 - b.u0), H = Math.round(head + foot + 2 * pad + (b.v1 - b.v0) * s);
   const c = document.createElement('canvas'); c.width = W * K; c.height = H * K; const ctx = c.getContext('2d');
   render(ctx, W, H, { s, cx: (b.u0 + b.u1) / 2, cy: (b.v0 + b.v1) / 2 - (head - foot) / 2 / s }, { k: K, style: UI.style, labels: true, live: false });
@@ -1378,17 +1746,33 @@ async function exportImage() {
   ctx.fillText(MODEL.units.filter(r => !r.err).map(r => r.unit.name + ' — ' + patDef(r.unit.P.type).name + ' ' + mm(r.unit.mat.L) + '×' + mm(r.unit.mat.W)).join(' · ').slice(0, 150), 24, 54);
   ctx.fillText(MODEL.mats.map(m => mm(m.M.L) + '×' + mm(m.M.W) + ': ' + m.boards + ' шт').join(' · ') + ' · зазор ' + mm(num(S.set.gap)) + ' мм', 24, 72);
   ctx.font = '500 11px ' + COL.body; ctx.fillText('Жёлтым — подрезки, красным — узкие куски, синим — линия разметки. Размеры в мм.', 24, H - 14);
-  const blob = await new Promise(res => c.toBlob(res, 'image/png'));
-  const r = blob ? await saveFile(fileSafe(S.name) + '.png', blob, 'image/png') : 'fallback';
-  if (r === 'saved') { say('Картинка сохранена.', 'ok'); return; } if (r === 'declined') return;
-  openModal('<header><h2>Картинка плана</h2><button class="icon" data-close type="button" aria-label="Закрыть">' + ICON.del + '</button></header><p class="note">Нажмите и удерживайте картинку (на компьютере — правая кнопка мыши), чтобы сохранить или отправить.</p><img alt="План раскладки" src="' + c.toDataURL('image/png') + '">');
+  return c;
 }
-function projData() { return { app: 'raskladka', v: 2, name: S.name, mat: S.mat, set: S.set, rooms: S.rooms, floorPat: S.floorPat }; }
+async function exportImage() {
+  if (!MODEL) return; const c = planCanvas(); if (!c) return;
+  const blob = await new Promise(res => c.toBlob(res, 'image/png')), name = fileSafe(S.name) + '.png';
+  const r = blob ? await saveFile(name, blob, 'image/png') : 'fallback';
+  if (r === 'saved') { say('Картинка сохранена.', 'ok'); return; } if (r === 'declined') return;
+  if (SHARE_URL) { try { URL.revokeObjectURL(SHARE_URL); } catch (e) { /* уже нет */ } }
+  SHARE_URL = blob ? URL.createObjectURL(blob) : c.toDataURL('image/png');
+  const files = blob ? [new File([blob], name, { type: 'image/png' })] : null;
+  openShareSheet('Картинка плана', files, '<img alt="План раскладки" src="' + SHARE_URL + '">',
+    PF.ios ? 'Если кнопки нет или она не сработала: нажмите и удерживайте картинку → <b>«Сохранить в Фото»</b>.' : PF.android ? 'Или нажмите и удерживайте картинку → «Скачать изображение».' : 'Нажмите и удерживайте картинку (на компьютере — правая кнопка мыши), чтобы сохранить или отправить.');
+}
+function projData() { return { app: 'raskladka', v: 2, name: S.name, mat: S.mat, set: S.set, rooms: S.rooms, floorPat: S.floorPat, noDoor: S.noDoor || [] }; }
 async function exportProject() {
-  const json = JSON.stringify(projData(), null, 1), r = await saveFile(fileSafe(S.name) + '.json', json, 'application/json');
+  const json = JSON.stringify(projData(), null, 1), name = fileSafe(S.name) + '.json', r = await saveFile(name, json, 'application/json');
   if (r === 'saved') { say('Файл проекта сохранён. Открыть: «Проекты» → «Открыть файл».', 'ok'); return; } if (r === 'declined') return;
-  openModal('<header><h2>Файл проекта</h2><button class="icon" data-close type="button" aria-label="Закрыть">' + ICON.del + '</button></header><p class="note">Скопируйте текст и сохраните. Загрузить обратно: «Проекты» → «Вставить текст».</p><textarea class="code" id="copyArea" readonly>' + esc(json) + '</textarea>');
-  $('#copyArea').select();
+  let files = [new File([json], name, { type: 'application/json' })];
+  if (!canShareFiles(files)) files = [new File([json], fileSafe(S.name) + '.txt', { type: 'text/plain' })];
+  openShareSheet('Файл проекта', files, '<textarea class="code" id="copyArea" readonly>' + esc(json) + '</textarea>', 'Сохраните файл или перешлите себе. Открыть: «Проекты» → «Открыть файл». Можно и скопировать текст ниже, а потом «Вставить текст».');
+}
+/* текст расчёта: на телефоне — меню «Поделиться» (мессенджеры, заметки), в Telegram — выбор чата */
+function shareReport() {
+  const text = reportText();
+  if (PF.inTG) { try { PF.tg.openTelegramLink(tgShareLink()); return; } catch (e) { /* ниже */ } }
+  if (navigator.share && isPhone()) { navigator.share({ title: S.name || 'Раскладка', text }).catch(err => { if (!err || err.name !== 'AbortError') copyReport(); }); return; }
+  copyReport();
 }
 
 /* ================= хранилище проектов ================= */
@@ -1475,7 +1859,7 @@ function openProjects() {
     '<p class="note">' + (Store.db ? 'Проекты хранятся в вашем аккаунте и видны только вам.' : Store.tg ? 'Проекты хранятся в облаке Telegram и открываются в этом боте на телефоне и компьютере.' : 'Проекты хранятся в этом браузере. Чтобы перенести на другое устройство, сохраните файл проекта.') + '</p>' +
     '<div class="row-btns"><button class="btn primary" data-pact="save" type="button">Сохранить текущий</button><button class="btn" data-pact="saveas" type="button">Сохранить как новый</button><button class="btn" data-pact="new" type="button">Новый проект</button></div>' +
     '<div class="plist">' + (rows || '<p class="note">Сохранённых проектов пока нет.</p>') + '</div>' +
-    '<div class="row-btns"><label class="btn" for="fileIn">Открыть файл</label><input type="file" id="fileIn" accept=".json,application/json" hidden><button class="btn" data-pact="paste" type="button">Вставить текст</button><button class="btn" data-pact="export" type="button">Файл текущего</button></div>', 'projects');
+    '<div class="row-btns"><label class="btn" for="fileIn">Открыть файл</label><input type="file" id="fileIn" accept=".json,.txt,application/json,text/plain" hidden><button class="btn" data-pact="paste" type="button">Вставить текст</button><button class="btn" data-pact="export" type="button">Файл текущего</button></div>', 'projects');
   $('#fileIn').addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => importText(String(rd.result)); rd.readAsText(f); });
 }
 function importText(t) {
@@ -1483,6 +1867,7 @@ function importText(t) {
   catch (e) { say('Это не файл проекта раскладки. Проверьте текст.', 'bad'); }
 }
 $('#modal').addEventListener('click', async e => {
+  if (e.target.closest('[data-share-file]')) { shareNow(); return; }
   if (e.target === $('#modal') || e.target.closest('[data-close]')) { closeModal(); return; }
   const o = e.target.closest('[data-open]'); if (o) { const p = Store.list().find(x => x.id === o.dataset.open); if (p) { try { loadProject(await Store.dataOf(p), p.id); closeModal(); say('Открыт проект «' + p.name + '».', 'ok'); } catch (err) { say('Не удалось открыть проект: нет связи с Telegram.', 'bad'); } } return; }
   const d = e.target.closest('[data-del]');
@@ -1496,38 +1881,52 @@ $('#modal').addEventListener('click', async e => {
   else if (act === 'doPaste') importText($('#pasteArea').value);
 });
 function openModal(html, kind) { const m = $('#modal'); $('#modalBox').innerHTML = html; m.dataset.kind = kind || ''; m.hidden = false; syncTgBack(); }
-function closeModal() { $('#modal').hidden = true; $('#modal').dataset.kind = ''; UI.delArm = null; syncTgBack(); }
+function closeModal() { $('#modal').hidden = true; $('#modal').dataset.kind = ''; UI.delArm = null; SHARE = null; syncTgBack(); }
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#modal').hidden) closeModal(); });
 
 /* ================= верх, режимы, разделитель ================= */
 $('#btnProjects').addEventListener('click', openProjects);
 $('#btnSave').addEventListener('click', () => saveProject(false));
-$$('[data-mode]').forEach(b => b.addEventListener('click', () => { UI.mode = b.dataset.mode; UI.addTpl = null; UI.addPrev = null; UI.delArm = null; syncToolbar(); modeHint(); draw(); saveUI(); }));
-$('#btnFit').addEventListener('click', () => { fitView(); draw(); });
-$('#btnLabels').addEventListener('click', () => { UI.labels = !UI.labels; syncToolbar(); draw(); saveUI(); });
-$('#btnStyle').addEventListener('click', () => { UI.style = UI.style === 'scheme' ? 'wood' : 'scheme'; syncToolbar(); draw(); saveUI(); });
-$('#btnImage').addEventListener('click', exportImage);
+$('#btnHelp').addEventListener('click', openHelp);
+document.addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('[data-view]'); if (!b) return;
+  const v = b.dataset.view;
+  if (v === 'fit') { fitView(); draw(); }
+  else if (v === 'labels') { UI.labels = !UI.labels; syncToolbar(); draw(); saveUI(); say(UI.labels ? 'Размеры на карте показаны.' : 'Размеры на карте скрыты.'); }
+  else if (v === 'style') { UI.style = UI.style === 'scheme' ? 'wood' : 'scheme'; syncToolbar(); draw(); saveUI(); say(UI.style === 'scheme' ? 'Схема: жёлтые — подрезки, красные — узкие куски.' : 'Вид «дерево».'); }
+});
 function syncToolbar() {
-  $$('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === UI.mode)));
-  $('#btnLabels').setAttribute('aria-pressed', String(UI.labels)); $('#btnStyle').setAttribute('aria-pressed', String(UI.style === 'scheme'));
+  $$('[data-view="labels"]').forEach(b => b.setAttribute('aria-pressed', String(UI.labels)));
+  $$('[data-view="style"]').forEach(b => b.setAttribute('aria-pressed', String(UI.style === 'scheme')));
   cv.className = 'm-' + UI.mode; $('#nudge').hidden = UI.mode !== 'pattern'; syncStep(); renderCtxbar();
   if (UI.mode === 'pattern') $('#nudgeTarget').textContent = unitName(UI.target).toLowerCase();
 }
 const work = $('#work'), mapcol = $('#mapcol'), splitter = $('#splitter');
 const isNarrow = () => window.matchMedia('(max-width:900px)').matches;
-function setMapH(h) { const total = work.clientHeight; if (!total) return; h = clamp(h, 170, Math.max(170, total - 150)); UI.mapH = h / total; work.style.setProperty('--mapH', Math.round(h) + 'px'); }
-function applyMapH() { if (!isNarrow()) return; setMapH((UI.mapH || 0.52) * work.clientHeight); }
+function setMapH(h) { const total = work.clientHeight; if (!total) return; h = clamp(h, 170, Math.max(170, total - 170)); UI.mapH = h / total; work.style.setProperty('--mapH', Math.round(h) + 'px'); }
+function applyMapH() { if (!isNarrow()) return; setMapH((UI.mapH || 0.5) * work.clientHeight); }
 let spl = null;
-splitter.addEventListener('pointerdown', e => { spl = { y: e.clientY, h: mapcol.getBoundingClientRect().height }; splitter.setPointerCapture(e.pointerId); });
-splitter.addEventListener('pointermove', e => { if (spl) setMapH(spl.h + (e.clientY - spl.y)); });
-const splEnd = () => { if (spl) { spl = null; saveUI(); } };
-splitter.addEventListener('pointerup', splEnd); splitter.addEventListener('pointercancel', splEnd);
-splitter.addEventListener('keydown', e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); setMapH(mapcol.getBoundingClientRect().height + (e.key === 'ArrowDown' ? 30 : -30)); saveUI(); } });
-splitter.addEventListener('dblclick', () => { setMapH(UI.mapH > 0.6 ? 0.52 * work.clientHeight : 0.74 * work.clientHeight); saveUI(); });
-function saveUI() { lsSet(KEY_UI, JSON.stringify({ tab: UI.tab, mode: UI.mode, style: UI.style, labels: UI.labels, step: UI.step, help: UI.help, mapH: UI.mapH, room: UI.room, installOff: !!UI.installOff })); }
-function loadUI() { try { const u = JSON.parse(lsGet(KEY_UI) || 'null'); if (u) Object.assign(UI, { tab: u.tab || 'plan', mode: u.mode || 'view', style: u.style || 'wood', labels: u.labels !== false, step: u.step || 10, help: u.help !== false, mapH: u.mapH || null, room: u.room || UI.room, installOff: !!u.installOff }); } catch (e) { /* по умолчанию */ } }
-function syncAll() { syncInputs(); renderPlanTab(); syncToolbar(); renderTplChips(); if (UI.tab === 'mat') renderMatTab(); if (UI.tab === 'pat') renderPatTab(); if (UI.tab === 'res') renderResults(); renderStatus(); renderPieceInfo(); }
-function measureTabs() { const t = $('#tabs'); if (t) document.documentElement.style.setProperty('--tabsH', t.offsetHeight + 'px'); }
+splitter.addEventListener('pointerdown', e => { spl = { y: e.clientY, h: mapcol.getBoundingClientRect().height, moved: false }; splitter.setPointerCapture(e.pointerId); });
+splitter.addEventListener('pointermove', e => { if (!spl) return; if (Math.abs(e.clientY - spl.y) > 4) spl.moved = true; if (spl.moved) setMapH(spl.h + (e.clientY - spl.y)); });
+/* нажатие без протяжки: карта крупно ↔ поровну */
+const splEnd = () => { if (!spl) return; if (!spl.moved) setMapH((UI.mapH || 0.5) > 0.6 ? 0.5 * work.clientHeight : 0.72 * work.clientHeight); spl = null; saveUI(); };
+splitter.addEventListener('pointerup', splEnd); splitter.addEventListener('pointercancel', () => { spl = null; });
+splitter.addEventListener('keydown', e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); setMapH(mapcol.getBoundingClientRect().height + (e.key === 'ArrowDown' ? 30 : -30)); saveUI(); } else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setMapH((UI.mapH || 0.5) > 0.6 ? 0.5 * work.clientHeight : 0.72 * work.clientHeight); saveUI(); } });
+function saveUI() { lsSet(KEY_UI, JSON.stringify({ tab: UI.tab, style: UI.style, labels: UI.labels, step: UI.step, helpSeen: !!UI.helpSeen, mapH: UI.mapH, room: UI.room, installOff: !!UI.installOff, open: UI.open })); }
+function loadUI() { try { const u = JSON.parse(lsGet(KEY_UI) || 'null'); if (u) Object.assign(UI, { tab: MODE_OF[u.tab] ? u.tab : 'plan', style: u.style || 'wood', labels: u.labels !== false, step: u.step || 10, helpSeen: !!u.helpSeen || u.help === false, mapH: u.mapH || null, room: u.room || UI.room, installOff: !!u.installOff, open: u.open && typeof u.open === 'object' ? u.open : {} }); } catch (e) { /* по умолчанию */ } UI.mode = MODE_OF[UI.tab]; }
+function openHelp() {
+  openModal('<header><h2>Как пользоваться</h2><button class="icon" data-close type="button" aria-label="Закрыть">' + ICON.del + '</button></header>' +
+    '<div class="help"><ol>' +
+    '<li><b>Комнаты.</b> Впишите длину и ширину комнаты или нарисуйте её на карте: «+ Комната» под картой. Нажмите на стену — появятся кнопки: проём, ниша, выступ, дуга. Выбранную комнату тяните пальцем: у соседней стены она прилипнет, в общей стене сразу появится проём, а размер стены разделится по стыку.</li>' +
+    '<li><b>Покрытие.</b> Выберите вид и размер планки или впишите свой размер.</li>' +
+    '<li><b>Рисунок.</b> Выберите рисунок. Тяните его пальцем по карте, стрелкой в центре меняйте направление. «Подобрать» найдёт положение без узких подрезок у стен.</li>' +
+    '<li><b>Расчёт.</b> С чего начать, что приходит к каждой стене, ряды, подрезки и сколько покупать. Нажмите на доску на карте — покажу, как её пилить. Картинку плана можно сохранить в Фото.</li>' +
+    '</ol></div>' +
+    '<p class="note"><b>Карта:</b> один палец — двигать (на шаге «Рисунок» — двигать рисунок), два пальца — масштаб и сдвиг карты. Кнопка с рамкой под картой — вписать план в экран. Полоску между картой и панелью можно тянуть или нажать — карта станет крупнее.</p>' +
+    '<button class="btn primary" data-close type="button">Понятно</button>', 'help');
+  UI.helpSeen = true; saveUI();
+}
+function syncAll() { syncInputs(); renderPlanTab(); syncToolbar(); renderTplChips(); if (UI.tab === 'mat') renderMatTab(); if (UI.tab === 'pat') renderPatTab(); if (UI.tab === 'res') renderResults(); renderStatus(); renderPieceInfo(); applyAcc(); renderSums(); }
 
 /* ================= Telegram и ярлык на экране ================= */
 const APP_URL = 'https://vidalost.github.io/Razmer/';
@@ -1541,7 +1940,7 @@ document.addEventListener('click', e => {
 let TG = null;
 function syncTgBack() {
   if (!TG || !PF.version('6.1')) return;
-  const need = !$('#modal').hidden || !$('#pieceInfo').hidden || !!UI.addTpl || UI.tab !== 'plan';
+  const need = !$('#modal').hidden || !$('#pieceInfo').hidden || !!UI.addTpl || !!UI.wall || UI.tab !== 'plan';
   try { if (need) TG.BackButton.show(); else TG.BackButton.hide(); } catch (e) { /* старый клиент */ }
 }
 function tgBack() {
@@ -1549,6 +1948,7 @@ function tgBack() {
   if (!$('#modal').hidden) closeModal();
   else if (!$('#pieceInfo').hidden) ACT['piece-close']();
   else if (UI.addTpl) ACT['add-cancel']();
+  else if (UI.wall) ACT['wall-back']();
   else if (UI.tab !== 'plan') setTab(tabs[Math.max(0, tabs.indexOf(UI.tab) - 1)]);
   syncTgBack();
 }
@@ -1593,9 +1993,10 @@ function start() {
   UI.catView = S.mat.cat || 'eng';
   recomputeNow();
   setTab(UI.tab); syncAll(); modeHint();
-  new ResizeObserver(() => { applyMapH(); resizeCanvas(); measureTabs(); }).observe(work);
+  if (!UI.helpSeen && !draft) setTimeout(openHelp, 400);
+  new ResizeObserver(() => { applyMapH(); resizeCanvas(); }).observe(work);
   new ResizeObserver(() => resizeCanvas()).observe(cv);
-  applyMapH(); resizeCanvas(); measureTabs();
+  applyMapH(); resizeCanvas();
   const mq = window.matchMedia('(prefers-color-scheme: dark)'), retheme = () => { readColors(); draw(); if (UI.tab === 'pat') renderPatList(); };
   if (mq.addEventListener) mq.addEventListener('change', retheme);
   new MutationObserver(retheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
@@ -1606,5 +2007,5 @@ function start() {
   try { if ('serviceWorker' in navigator && location.protocol === 'https:' && window.top === window.self && !window.claude) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) { /* без офлайна */ }
 }
 start();
-if (/[?&]debug=1/.test(location.search)) window.__rd = { gizmo: () => { const g = gizmo(); return g && { tx: g.tx, ty: g.ty, cx: g.cx, cy: g.cy }; }, rotHandle: () => rotHandle(UI.room), state: () => JSON.parse(JSON.stringify(S)), ui: () => ({ room: UI.room, target: UI.target, mode: UI.mode }), w2s: (x, y) => w2s(x, y) };
+if (/[?&]debug=1/.test(location.search)) window.__rd = { gizmo: () => { const g = gizmo(); return g && { tx: g.tx, ty: g.ty, cx: g.cx, cy: g.cy }; }, rotHandle: () => rotHandle(UI.room), state: () => JSON.parse(JSON.stringify(S)), ui: () => ({ room: UI.room, target: UI.target, mode: UI.mode, tab: UI.tab, wall: UI.wall, lastDoor: UI.lastDoor }), w2s: (x, y) => w2s(x, y), adj: () => MODEL.adj, geo: id => { const G = MODEL.geo[id]; return G && { poly: G.g.poly, corners: G.g.corners, doors: G.doors.map(d => [d.wall, d.t0, d.t1]), warn: G.warn || null, err: G.err || null }; } };
 })();

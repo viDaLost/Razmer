@@ -78,5 +78,56 @@ for (const t of ['rect', 'L', 'arcwall', 'bevel']) {
   const S = E.migrateState(old);
   ok(S.v === 2 && S.rooms.length === 1 && S.floorPat.type === 'bond2' && S.mat.tone === 'oak', 'migrate v1');
 }
+// ниши (наружу) и выступы (внутрь), в том числе в углах
+{
+  const mk = niches => { const r = Object.assign(E.newRoom('N', E.rectWalls(4000, 3000)), { id: 'r1' }); r.niches = niches; return r; };
+  const A0 = 4000 * 3000;
+  const cases = [
+    ['niche mid', [{ id: 'n1', kind: 'niche', wall: 0, pos: 1000, width: 1200, depth: 150 }], A0 + 1200 * 150],
+    ['niche corner', [{ id: 'n1', kind: 'niche', wall: 2, pos: 0, width: 900, depth: 600 }], A0 + 900 * 600],
+    ['niche no floor', [{ id: 'n1', kind: 'niche', wall: 1, pos: 500, width: 1500, depth: 600, floor: false }], A0],
+    ['box mid', [{ id: 'n1', kind: 'box', wall: 3, pos: 800, width: 400, depth: 300 }], A0 - 400 * 300],
+    ['box start corner', [{ id: 'n1', kind: 'box', wall: 0, pos: 0, width: 400, depth: 300 }], A0 - 400 * 300],
+    ['box end corner', [{ id: 'n1', kind: 'box', wall: 1, pos: 2600, width: 400, depth: 350 }], A0 - 400 * 350],
+    ['boxes two corners', [{ id: 'n1', kind: 'box', wall: 0, pos: 3600, width: 400, depth: 300 }, { id: 'n2', kind: 'box', wall: 2, pos: 0, width: 500, depth: 250 }, { id: 'n3', kind: 'niche', wall: 3, pos: 1000, width: 1000, depth: 120 }], A0 - 400 * 300 - 500 * 250 + 1000 * 120],
+  ];
+  for (const [label, niches, expA] of cases) {
+    const room = mk(niches), g = E.roomGeom(room);
+    ok(Math.abs(Math.abs(E.area(g.poly)) - expA) < 1, 'geom ' + label, Math.abs(E.area(g.poly)) + ' vs ' + expA);
+    for (const pid of ['remnant', 'herring1', 'chevron', 'basket']) {
+      const S = JSON.parse(JSON.stringify(base)); S.set.gap = 10; S.rooms = [room];
+      const m = pid === 'basket' ? [280, 70] : pid === 'remnant' ? [1380, 193] : [600, 120]; S.mat.L = m[0]; S.mat.W = m[1];
+      Object.assign(S.floorPat, E.defaultPat(pid), { refRoom: 'r1', offA: 11, offB: 23 });
+      checkState('niche ' + label + ' ' + pid, S, 3e-4);
+    }
+    // рамка вдоль стен с нишами и выступами
+    const S = JSON.parse(JSON.stringify(base)); S.set.gap = 10; S.rooms = [mk(niches)];
+    S.mat.L = 600; S.mat.W = 120; Object.assign(S.floorPat, E.defaultPat('herring1'), { refRoom: 'r1' });
+    S.rooms[0].border.on = true; S.rooms[0].border.rows = 2; S.rooms[0].border.pat.type = 'bond2'; S.rooms[0].border.mat = { L: 1380, W: 193, shape: 'plank', joint: 0 };
+    const { geo } = checkState('niche+border ' + label, S, 5e-4);
+    ok(!geo.r1.borderErr, 'niche+border fits ' + label, geo.r1.borderErr);
+  }
+  // направление рисунка от стены с выступом в углу не сбивается
+  const r = mk([{ id: 'n1', kind: 'box', wall: 0, pos: 0, width: 400, depth: 300 }]), S = JSON.parse(JSON.stringify(base)); S.rooms = [r];
+  const geo = E.computeGeo(S), F = E.frameFor(geo.r1, Object.assign(E.defaultPat('bond2'), { refWall: 0 }));
+  ok(Math.abs(F.eu[1]) < 1e-9 && Math.abs(F.A[0]) < 1e-6 && Math.abs(F.A[1]) < 1e-6, 'corner box keeps frame', JSON.stringify([F.eu, F.A]));
+}
+// стыки комнат: стена одной комнаты против стены другой через перегородку
+{
+  const S = E.defaultState(); let geo = E.computeGeo(S), adj = E.adjacency(S, geo);
+  ok(adj.length === 2 && adj.some(a => a.a === 'r1' && a.i === 1 && Math.abs(a.o1 - a.o0 - 3850) < 1), 'adjacency default', JSON.stringify(adj));
+  S.rooms[1].walls = E.rectWalls(3600, 2000); S.rooms[1].y0 = 1000; geo = E.computeGeo(S); adj = E.adjacency(S, geo);
+  const a = adj.find(x => x.a === 'r1');
+  ok(a && Math.abs(a.o0 - 1000) < 1 && Math.abs(a.o1 - 3000) < 1, 'adjacency partial', JSON.stringify(a));
+  S.rooms[1].x0 = 5600; geo = E.computeGeo(S); ok(E.adjacency(S, geo).length === 0, 'adjacency apart');
+  // комната, обойдённая в другую сторону, тоже находится
+  S.rooms[1] = Object.assign(S.rooms[1], { x0: 5320, y0: 3850, a0: 0, walls: [{ len: 3600, turn: 0 }, { len: 3850, turn: -90 }, { len: 3600, turn: -90 }, { len: 3850, turn: -90 }] });
+  geo = E.computeGeo(S); ok(!geo.r2.err && E.adjacency(S, geo).length === 2, 'adjacency ccw room', JSON.stringify(E.adjacency(S, geo).map(x => [x.a, x.i, x.o0, x.o1])));
+}
+// старые проекты без ниш открываются, ниши сохраняются
+{
+  const S = E.migrateState({ v: 2, rooms: [{ id: 'a', walls: E.rectWalls(3000, 3000), niches: [{ kind: 'box', wall: 1, pos: 100, width: 300, depth: 200 }], doors: [{ wall: 0, pos: 100, width: 900, auto: true, to: 'b', full: true }] }], noDoor: ['a|b'] });
+  ok(S.rooms[0].niches.length === 1 && S.rooms[0].niches[0].kind === 'box' && S.rooms[0].doors[0].auto && S.rooms[0].doors[0].full && S.noDoor[0] === 'a|b', 'migrate niches/doors');
+}
 console.log('checks', total, 'failed', fails);
 process.exit(fails ? 1 : 0);

@@ -154,15 +154,15 @@ function defaultPat(type) {
 const defBorder = () => ({ on: false, rows: 2, mat: null, pat: Object.assign(defaultPat('bond2'), { minPiece: 200, minStag: 200 }) });
 let ridSeq = 0;
 const newId = p => p + Date.now().toString(36).slice(-4) + (ridSeq++).toString(36) + Math.random().toString(36).slice(2, 5);
-function newRoom(name, walls, x0, y0) { return { id: newId('r'), name: name || 'Комната', x0: x0 || 0, y0: y0 || 0, a0: 0, walls: walls || rectWalls(4200, 3600), doors: [], own: false, pat: defaultPat('remnant'), mat: null, border: defBorder(), inserts: [] }; }
+function newRoom(name, walls, x0, y0) { return { id: newId('r'), name: name || 'Комната', x0: x0 || 0, y0: y0 || 0, a0: 0, walls: walls || rectWalls(4200, 3600), doors: [], niches: [], own: false, pat: defaultPat('remnant'), mat: null, border: defBorder(), inserts: [] }; }
 function defaultState() {
-  const r1 = { id: 'r1', name: 'Гостиная', x0: 0, y0: 0, a0: 0, walls: rectWalls(5200, 3850), doors: [{ id: 'd1', wall: 1, pos: 1450, width: 900 }], own: false, pat: defaultPat('remnant'), mat: null, border: defBorder(), inserts: [] };
-  const r2 = { id: 'r2', name: 'Спальня', x0: 5320, y0: 0, a0: 0, walls: rectWalls(3600, 3850), doors: [], own: false, pat: defaultPat('remnant'), mat: null, border: defBorder(), inserts: [] };
+  const r1 = { id: 'r1', name: 'Гостиная', x0: 0, y0: 0, a0: 0, walls: rectWalls(5200, 3850), doors: [{ id: 'd1', wall: 1, pos: 1450, width: 900, auto: true, to: 'r2' }], niches: [], own: false, pat: defaultPat('remnant'), mat: null, border: defBorder(), inserts: [] };
+  const r2 = { id: 'r2', name: 'Спальня', x0: 5320, y0: 0, a0: 0, walls: rectWalls(3600, 3850), doors: [], niches: [], own: false, pat: defaultPat('remnant'), mat: null, border: defBorder(), inserts: [] };
   return {
     v: 2, pid: null, name: 'Пример: гостиная и спальня',
     mat: { cat: 'eng', item: 'eng:9', L: 600, W: 120, T: 15, shape: 'plank', joint: 0, tone: 'natural' },
     set: { gap: 10, kerf: 3, perPack: 0, packM2: 0, reserve: 5, wallT: 120 },
-    rooms: [r1, r2],
+    rooms: [r1, r2], noDoor: [],
     floorPat: Object.assign(defaultPat('herring1'), { refRoom: 'r1', minPiece: 150, minStag: 150, offA: 78, offB: 218 }),
   };
 }
@@ -189,12 +189,14 @@ function migrateState(st) {
     if (!BORDER_PATTERNS.includes(border.pat.type)) border.pat.type = 'bond2';
     return {
       id: String(r.id || 'r' + (i + 1)), name: String(r.name || 'Комната ' + (i + 1)), x0: num(r.x0), y0: num(r.y0), a0: num(r.a0), walls,
-      doors: (Array.isArray(r.doors) ? r.doors : []).map((x, j) => ({ id: String(x.id || 'd' + j), wall: num(x.wall) | 0, pos: num(x.pos), width: Math.max(100, num(x.width, 800)) })),
+      doors: (Array.isArray(r.doors) ? r.doors : []).map((x, j) => Object.assign({ id: String(x.id || 'd' + j), wall: num(x.wall) | 0, pos: num(x.pos), width: Math.max(100, num(x.width, 800)) }, x.auto ? { auto: true } : {}, x.full ? { full: true } : {}, x.to ? { to: String(x.to) } : {})),
+      niches: (Array.isArray(r.niches) ? r.niches : []).map((x, j) => ({ id: String(x.id || 'n' + j), kind: x.kind === 'box' ? 'box' : 'niche', wall: num(x.wall) | 0, pos: Math.max(0, num(x.pos)), width: Math.max(50, num(x.width, 1000)), depth: Math.max(10, num(x.depth, 150)), floor: x.floor !== false, name: typeof x.name === 'string' ? x.name.slice(0, 40) : '' })),
       own: !!r.own, pat, mat: r.mat && typeof r.mat === 'object' ? Object.assign({}, d.mat, r.mat) : null, border,
       inserts: (Array.isArray(r.inserts) ? r.inserts : []).map((x, j) => ({ id: String(x.id || 'i' + j), w: Math.max(100, num(x.w, 2000)), h: Math.max(100, num(x.h, 2000)), dx: num(x.dx), dy: num(x.dy), rot: num(x.rot), pat: Object.assign(defaultPat('basket'), x.pat || {}), mat: x.mat && typeof x.mat === 'object' ? Object.assign({}, d.mat, x.mat) : null })),
     };
   });
   if (!out.rooms.some(r => r.id === out.floorPat.refRoom)) out.floorPat.refRoom = out.rooms[0].id;
+  out.noDoor = Array.isArray(st.noDoor) ? st.noDoor.filter(x => typeof x === 'string').slice(0, 200) : [];
   return out;
 }
 
@@ -216,18 +218,78 @@ const arcRadius = (c, h) => Math.abs(h) < 0.5 ? Infinity : (c * c / 4 + h * h) /
 function arcLength(c, h) { if (Math.abs(h) < 0.5) return c; const R = arcRadius(c, h), half = Math.asin(clamp(c / 2 / R, -1, 1)); const th = Math.abs(h) > c / 2 ? 2 * (Math.PI - half) : 2 * half; return R * th; }
 const sagittaFromRadius = (c, R) => (R < c / 2 ? NaN : R - Math.sqrt(R * R - c * c / 4));
 
-function roomGeom(room) {
+/* ниши (наружу, в толщу стены) и выступы (короб, колонна у стены — внутрь комнаты) на прямых стенах */
+const NICHE_KINDS = { niche: 'Ниша', box: 'Выступ' };
+function nicheSpans(room, i, c) {
+  const out = [];
+  for (const x of room.niches || []) {
+    if ((num(x.wall) | 0) !== i) continue;
+    const t0 = clamp(num(x.pos), 0, c), t1 = clamp(num(x.pos) + Math.max(0, num(x.width)), 0, c), d = Math.max(0, num(x.depth));
+    if (t1 - t0 < 20 || d < 5) continue;
+    if (out.some(o => t0 < o.t1 - 0.5 && t1 > o.t0 + 0.5)) continue; // нахлёст с соседней — пропускаем
+    out.push({ niche: x, t0, t1, d, kind: x.kind === 'box' ? 'box' : 'niche', floor: x.kind === 'box' || x.floor !== false });
+  }
+  return out.sort((a, b) => a.t0 - b.t0);
+}
+function roomGeom(room, opt) {
   let x = num(room.x0), y = num(room.y0), h = num(room.a0) * DEG;
-  const W = room.walls || [], corners = [[x, y]];
+  const W = room.walls || [], corners = [[x, y]], skip = opt && opt.skip;
   W.forEach((w, i) => { if (i > 0) h += num(w.turn) * DEG; x += num(w.len) * Math.cos(h); y += num(w.len) * Math.sin(h); corners.push([x, y]); });
   const closure = dist(corners[corners.length - 1], corners[0]), closed = closure < 1;
   if (closed) corners.pop();
   const n = corners.length, arcs = W.map(w => num(w.arc)).slice(0, n);
   while (arcs.length < n) arcs.push(0);
-  const build = sg => { const poly = [], wIdx = []; for (let i = 0; i < n; i++) { const P = corners[i], Q = corners[(i + 1) % n]; wIdx.push(poly.length); poly.push(P); for (const q of arcPts(P, Q, arcs[i], sg)) poly.push(q); } return { poly, wIdx }; };
+  const build = sg => {
+    const spans = [], niches = [];
+    for (let i = 0; i < n; i++) {
+      const P = corners[i], Q = corners[(i + 1) % n], c = dist(P, Q), list = [];
+      if (Math.abs(arcs[i]) < 0.5 && c >= 1) {
+        const u = unitV(P, Q), no = sg > 0 ? [u[1], -u[0]] : [-u[1], u[0]];
+        for (const s of nicheSpans(room, i, c)) {
+          const k = s.kind === 'box' ? -s.d : s.d, at = (t, e) => [P[0] + u[0] * t + no[0] * e, P[1] + u[1] * t + no[1] * e];
+          s.pts = [at(s.t0, 0), at(s.t0, k), at(s.t1, k), at(s.t1, 0)]; Object.assign(s, { wall: i, u, no, c });
+          s.atStart = s.kind === 'box' && s.t0 <= 0.5; s.atEnd = s.kind === 'box' && s.t1 >= c - 0.5;
+          niches.push(s); if (s.floor && !(skip && skip(s))) list.push(s);
+        }
+      }
+      spans.push(list);
+    }
+    // выступ в углу заменяет угол точкой на соседней стене; два выступа в одном углу и выступ во всю стену не строим
+    for (let i = 0; i < n; i++) {
+      const L = spans[i], prev = spans[(i - 1 + n) % n], pe = prev[prev.length - 1];
+      const arcPrev = Math.abs(arcs[(i - 1 + n) % n]) >= 0.5, arcNext = Math.abs(arcs[(i + 1) % n]) >= 0.5;
+      spans[i] = L.filter(s => { const bad = (s.atStart && s.atEnd) || (s.atStart && (arcPrev || (pe && pe.atEnd))) || (s.atEnd && arcNext); if (bad) s.off = true; return !bad; });
+    }
+    const poly = [], wIdx = [], exact = [];
+    for (let i = 0; i < n; i++) {
+      const P = corners[i], Q = corners[(i + 1) % n], prev = spans[(i - 1 + n) % n], pe = prev[prev.length - 1], L = spans[i];
+      wIdx.push(poly.length);
+      if (L[0] && L[0].atStart) { poly.push(L[0].pts[1]); exact.push(false); }
+      else if (pe && pe.atEnd) { poly.push(pe.pts[2]); exact.push(false); }
+      else { poly.push(P); exact.push(true); }
+      if (Math.abs(arcs[i]) >= 0.5) { for (const q of arcPts(P, Q, arcs[i], sg)) poly.push(q); continue; }
+      for (const s of L) {
+        if (s.atStart) { poly.push(s.pts[2]); if (s.t1 < s.c - 0.5) poly.push(s.pts[3]); continue; }
+        if (s.t0 > 0.5) poly.push(s.pts[0]);
+        poly.push(s.pts[1]);
+        if (s.atEnd) continue; // pts[2] начнёт следующую стену
+        poly.push(s.pts[2]);
+        if (s.t1 < s.c - 0.5) poly.push(s.pts[3]);
+      }
+    }
+    return { poly, wIdx, exact, niches };
+  };
   let sgn = Math.sign(area(corners)) || 1, b = build(sgn);
   const s2 = Math.sign(area(b.poly)) || 1; if (s2 !== sgn) { sgn = s2; b = build(sgn); }
-  return { corners, poly: b.poly, wIdx: b.wIdx, n, closure, autoClosed: !closed, sgn, arcs };
+  return { corners, poly: b.poly, wIdx: b.wIdx, exact: b.exact, niches: b.niches, n, closure, autoClosed: !closed, sgn, arcs };
+}
+/* угол комнаты, сдвинутый внутрь на d по обеим стенам (по хордам) */
+function insetCorner(g, i, d) {
+  const n = g.n, c = g.corners, a = c[(i - 1 + n) % n], b = c[i], e = c[(i + 1) % n];
+  const u1 = unitV(a, b), u2 = unitV(b, e), in1 = inwardOf(u1, g.sgn), in2 = inwardOf(u2, g.sgn);
+  const p1 = [b[0] + in1[0] * d, b[1] + in1[1] * d], p2 = [b[0] + in2[0] * d, b[1] + in2[1] * d];
+  const den = u1[0] * u2[1] - u1[1] * u2[0]; if (Math.abs(den) < 1e-9) return p2;
+  const t = ((p2[0] - p1[0]) * u2[1] - (p2[1] - p1[1]) * u2[0]) / den; return [p1[0] + u1[0] * t, p1[1] + u1[1] * t];
 }
 function wallsFromCorners(corners, arcs) {
   const n = corners.length, walls = []; let prev = 0, a0 = 0;
@@ -269,26 +331,36 @@ function roomLay(room, S) {
   const lay = gap > 0 ? insetPoly(g.poly, gap) : g.poly.map(p => p.slice());
   if (Math.abs(area(lay)) < 1e5 || Math.sign(area(lay)) !== g.sgn) { out.err = 'Зазор слишком большой для этой комнаты.'; return out; }
   out.lay = lay; out.outer = gap - tol > 0 ? insetPoly(g.poly, gap - tol) : g.poly;
-  let center = lay;
+  // углы укладки для системы координат рисунка: точные, даже если угол занят выступом
+  out.cIn = g.wIdx.map((k, i) => g.exact[i] ? lay[k] : insetCorner(g, i, gap));
+  let center = lay; out.cIdx = g.wIdx;
   const B = room.border;
   if (B && B.on) {
     const bm = unitMat(B.mat, S), bw = Math.max(1, num(B.rows, 1) | 0) * (bm.W + bm.g);
-    const inner = insetPoly(lay, bw);
+    // мелкую нишу рамка не обходит, а заполняет: внутренний контур строим без неё
+    const small = s => s.kind === 'niche' && (s.d < bw + 1 || s.t1 - s.t0 < 2 * bw + 1);
+    const gR = g.niches.some(s => s.floor && small(s)) ? roomGeom(room, { skip: small }) : g;
+    const layR = gR === g ? lay : (gap > 0 ? insetPoly(gR.poly, gap) : gR.poly.map(p => p.slice()));
+    const inner = insetPoly(layR, bw);
     if (bm.W >= 20 && Math.abs(area(inner)) > 1e5 && Math.sign(area(inner)) === g.sgn) {
-      center = inner; out.inner = inner; out.bw = bw; out.sides = [];
-      const n = g.n, Lp = lay.length;
+      center = inner; out.inner = inner; out.cIdx = gR.wIdx; out.bw = bw; out.sides = [];
+      const n = g.n, Lp = lay.length, Ip = inner.length;
       for (let i = 0; i < n; i++) {
-        const s = g.wIdx[i], e = i + 1 < n ? g.wIdx[i + 1] : Lp, pts = [];
+        const s = g.wIdx[i], e = i + 1 < n ? g.wIdx[i + 1] : Lp, s2 = gR.wIdx[i], e2 = i + 1 < n ? gR.wIdx[i + 1] : Ip, pts = [];
         for (let k = s; k <= e; k++) pts.push(lay[k % Lp]);
-        for (let k = e; k >= s; k--) pts.push(inner[k % Lp]);
-        const poly = dedupe(pts), A = lay[s], Bp = lay[e % Lp];
+        for (let k = e2; k >= s2; k--) pts.push(inner[k % Ip]);
+        const poly = dedupe(pts), A = out.cIn[i], Bp = out.cIn[(i + 1) % n];
         if (poly.length < 3 || dist(A, Bp) < 1) { out.sides.push(null); continue; }
         const e1 = unitV(A, Bp); out.sides.push({ poly, A, e1, e2: inwardOf(e1, g.sgn), wall: i });
       }
     } else out.borderErr = 'Рамка не помещается: уменьшите число рядов.';
   }
   out.center = center;
-  for (const d of room.doors || []) { const r = doorRect(g, d, S); if (r) out.doors.push(r); }
+  for (const d of room.doors || []) {
+    const r = doorRect(g, d, S); if (!r) continue;
+    if (g.niches.some(s => s.wall === r.wall && !s.off && r.t0 < s.t1 - 1 && r.t1 > s.t0 + 1)) { out.warn = 'Проём на стене ' + (r.wall + 1) + ' попадает на нишу или выступ — сдвиньте его.'; continue; }
+    out.doors.push(r);
+  }
   for (const ins of room.inserts || []) out.inserts.push(insertGeom(out, ins));
   return out;
 }
@@ -312,6 +384,28 @@ function insertGeom(G, ins) {
   return { ins, C, a, b, rect, region: clipBy(G.center, rect) };
 }
 function computeGeo(S) { const geo = {}; for (const r of S.rooms) geo[r.id] = roomLay(r, S); return geo; }
+/* где комнаты приставлены друг к другу через перегородку: стена i комнаты a смотрит на стену j комнаты b.
+   o0..o1 — общий участок вдоль стены i (от её первого угла), p0..p1 — он же вдоль стены j */
+function adjacency(S, geo, tolD) {
+  const T = Math.max(0, num(S.set.wallT, 120)), tol = tolD || 6, out = [];
+  const ok = S.rooms.filter(r => geo[r.id] && geo[r.id].g && !geo[r.id].err);
+  const walls = r => { const g = geo[r.id].g, list = []; for (let i = 0; i < g.n; i++) { if (Math.abs(g.arcs[i]) >= 0.5) continue; const P = g.corners[i], Q = g.corners[(i + 1) % g.n], c = dist(P, Q); if (c < 50) continue; const u = unitV(P, Q); list.push({ i, P, Q, c, u, no: g.sgn > 0 ? [u[1], -u[0]] : [-u[1], u[0]] }); } return list; };
+  const W = new Map(ok.map(r => [r.id, walls(r)]));
+  for (const A of ok) for (const B of ok) {
+    if (A === B) continue;
+    for (const wa of W.get(A.id)) for (const wb of W.get(B.id)) {
+      if (wa.no[0] * wb.no[0] + wa.no[1] * wb.no[1] > -0.9998) continue; // стены должны смотреть друг на друга
+      const d1 = (wb.P[0] - wa.P[0]) * wa.no[0] + (wb.P[1] - wa.P[1]) * wa.no[1], d2 = (wb.Q[0] - wa.P[0]) * wa.no[0] + (wb.Q[1] - wa.P[1]) * wa.no[1];
+      if (Math.abs(d1 - T) > tol || Math.abs(d2 - T) > tol) continue;
+      const t1 = (wb.P[0] - wa.P[0]) * wa.u[0] + (wb.P[1] - wa.P[1]) * wa.u[1], t2 = (wb.Q[0] - wa.P[0]) * wa.u[0] + (wb.Q[1] - wa.P[1]) * wa.u[1];
+      const o0 = Math.max(0, Math.min(t1, t2)), o1 = Math.min(wa.c, Math.max(t1, t2)); if (o1 - o0 < 100) continue;
+      const pr = t => { const X = [wa.P[0] + wa.u[0] * t, wa.P[1] + wa.u[1] * t]; return (X[0] - wb.P[0]) * wb.u[0] + (X[1] - wb.P[1]) * wb.u[1]; };
+      const q0 = pr(o0), q1 = pr(o1);
+      out.push({ a: A.id, i: wa.i, b: B.id, j: wb.i, o0, o1, c: wa.c, p0: Math.min(q0, q1), p1: Math.max(q0, q1) });
+    }
+  }
+  return out;
+}
 
 /* ================= система координат рисунка ================= */
 const dirDeg = p => p.dir === 'across' ? 90 : p.dir === 'diag' ? 45 : p.dir === 'custom' ? num(p.angle, 0) : 0;
@@ -332,8 +426,8 @@ function makeFrame(A, e1, e2, pat) {
   };
 }
 function frameFor(G, P) {
-  const g = G.g, n = g.n, r = clamp(num(P.refWall) | 0, 0, n - 1), L = G.lay;
-  const A = L[g.wIdx[r]], B = L[g.wIdx[(r + 1) % n]];
+  const g = G.g, n = g.n, r = clamp(num(P.refWall) | 0, 0, n - 1);
+  const A = G.cIn[r], B = G.cIn[(r + 1) % n];
   const e1 = dist(A, B) > 1 ? unitV(A, B) : [1, 0];
   return makeFrame(A, e1, inwardOf(e1, g.sgn), P);
 }
@@ -645,7 +739,7 @@ const E = {
   area, perim, inPoly, segDist, minEdgeDist, bboxOf, bbHit, bbUnion, centroid, centroidMany, dedupe, clipHalf, clipBy, convexMinus, insetPoly, thickOf, onLine,
   CATS, catById, TONES, PATTERNS, patDef, BORDER_PATTERNS, TEMPLATES, rectWalls,
   defaultPat, defBorder, newRoom, newId, defaultState, migrateState,
-  arcPts, arcRadius, arcLength, sagittaFromRadius, roomGeom, wallsFromCorners, innerAngles, unitV, inwardOf, unitMat, tolFor, roomLay, doorRect, insertGeom, computeGeo,
+  arcPts, arcRadius, arcLength, sagittaFromRadius, NICHE_KINDS, nicheSpans, roomGeom, insetCorner, adjacency, wallsFromCorners, innerAngles, unitV, inwardOf, unitMat, tolFor, roomLay, doorRect, insertGeom, computeGeo,
   dirDeg, makeFrame, frameFor,
   mkRect, genBond, randShifts, genHerring, genChevron, genBasket, scanPoly, rowIntervals, planRemnant,
   unitKeys, buildUnit, unitError, genRaw, computeUnit,
