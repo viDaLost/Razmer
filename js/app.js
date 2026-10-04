@@ -33,7 +33,7 @@ const ICON = {
 
 const KEY_DRAFT = 'raskladka.draft.v1', KEY_PROJ = 'raskladka.projects.v1', KEY_MATS = 'raskladka.mats.v1', KEY_UI = 'raskladka.ui.v2';
 let S = defaultState();
-const UI = { tab: 'plan', mode: 'rooms', style: 'wood', labels: true, room: 'r1', target: 'floor', matTarget: 'main', catView: 'eng', addTpl: null, addPrev: null, sel: null, hl: null, step: 10, variants: null, helpSeen: false, mapH: null, addRoom: false, delArm: null, wallFocus: -1, wall: null, open: {}, lastDoor: null };
+const UI = { tab: 'plan', mode: 'rooms', style: 'wood', labels: true, room: 'r1', target: 'floor', matTarget: 'main', catView: 'eng', addTpl: null, addPrev: null, sel: null, hl: null, step: 10, variants: null, helpSeen: false, mapH: null, addRoom: false, delArm: null, wallFocus: -1, wall: null, open: {}, item: null, place: null, ghost: null };
 /* шаг определяет, что делает палец на карте */
 const MODE_OF = { plan: 'rooms', mat: 'view', pat: 'pattern', res: 'view' };
 let MODEL = null;
@@ -332,7 +332,7 @@ function render(ctx, W, H, vw, opt) {
     pillText(ctx, 'СТАРТ', px + du[0] * 10 + dv[0] * 20, py + du[1] * 10 + dv[1] * 20, COL.chalk, COL.onChalk, 'left');
   }
   // названия комнат на шаге «Комнаты» (под подписями стен); у выбранной — под значком переноса, если комната крупная
-  if (live && mode === 'rooms') {
+  if (live && mode === 'rooms' && !UI.item && !UI.place) {
     for (const r of S.rooms) {
       const G = geo[r.id]; if (!G || !G.g) continue; const c = centroid(G.g.poly), bb = bboxOf(G.g.poly), sel = r.id === UI.room;
       if (sel && (bb.v1 - bb.v0) * s < 110) continue;
@@ -361,7 +361,7 @@ function render(ctx, W, H, vw, opt) {
       ctx.fillStyle = selW ? '#3b2a00' : COL.onChalk; ctx.textAlign = 'center'; ctx.fillText(String(i + 1), mx - tw / 2 - 11, my + 0.5);
       ctx.textAlign = 'left'; ctx.lineWidth = 3; ctx.strokeStyle = COL.canvas; ctx.strokeText(txt, mx - tw / 2, my + 0.5); ctx.fillStyle = COL.ink; ctx.fillText(txt, mx - tw / 2, my + 0.5);
       // стыки с соседними комнатами: засечки и длины частей стены внутри комнаты
-      const js = isArc ? [] : joints.filter(a => a.i === i);
+      const js = isArc || (live && (selWallOf(UI.item) === R.id + ':' + i || (UI.ghost && UI.ghost.rid === R.id && UI.ghost.i === i))) ? [] : joints.filter(a => a.i === i);
       if (!js.length) continue;
       const bps = [0, c]; for (const a of js) bps.push(a.o0, a.o1);
       bps.sort((a, b) => a - b); const br = []; for (const b of bps) if (!br.length || b - br[br.length - 1] > 5) br.push(b); else br[br.length - 1] = Math.max(br[br.length - 1], b);
@@ -397,7 +397,11 @@ function render(ctx, W, H, vw, opt) {
       ctx.beginPath(); ctx.moveTo(hx, hy - 9); ctx.lineTo(hx + 9, hy); ctx.lineTo(hx, hy + 9); ctx.lineTo(hx - 9, hy); ctx.closePath();
       ctx.fillStyle = COL.panel; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = COL.tape; ctx.stroke();
     }
-    if (RG && RG.g && !UI.addTpl) for (const q of RG.g.corners) { ctx.beginPath(); ctx.arc(X(q[0]), Y(q[1]), 7, 0, Math.PI * 2); ctx.fillStyle = COL.panel; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = COL.chalk; ctx.stroke(); }
+    // выбранный проём/ниша и «призрак» при установке: размеры от углов, ручки
+    const ir = itemRef();
+    if (ir) drawItem(ctx, ir.L, ir.type, ir.x.kind, num(ir.x.pos), num(ir.x.width), num(ir.x.depth), false, ir.x.floor === false);
+    if (UI.ghost) drawItem(ctx, UI.ghost.L, UI.ghost.type, UI.ghost.kind, UI.ghost.pos, UI.ghost.width, UI.ghost.depth, true, false);
+    if (RG && RG.g && !UI.addTpl && !UI.place) for (const q of RG.g.corners) { ctx.beginPath(); ctx.arc(X(q[0]), Y(q[1]), 7, 0, Math.PI * 2); ctx.fillStyle = COL.panel; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = COL.chalk; ctx.stroke(); }
     const h = !UI.addTpl && R && rotHandle(R.id);
     if (h) {
       ctx.strokeStyle = COL.chalk; ctx.lineWidth = 2; ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.moveTo(h.tx, h.ty); ctx.lineTo(h.sx, h.sy + 13); ctx.stroke(); ctx.setLineDash([]);
@@ -457,6 +461,28 @@ function neighborDoorCuts(rid, i, P, u) {
     for (const d of G.doors) { if (d.wall !== a.j) continue; const B1 = [d.P[0] + d.u[0] * d.t0, d.P[1] + d.u[1] * d.t0], B2 = [d.P[0] + d.u[0] * d.t1, d.P[1] + d.u[1] * d.t1], t1 = (B1[0] - P[0]) * u[0] + (B1[1] - P[1]) * u[1], t2 = (B2[0] - P[0]) * u[0] + (B2[1] - P[1]) * u[1]; out.push([Math.min(t1, t2), Math.max(t1, t2)]); }
   }
   return out;
+}
+const selWallOf = it => { const ref = it && itemRef(it); return ref ? ref.r.id + ':' + (ref.x.wall | 0) : ''; };
+function drawItem(ctx, L, type, kind, pos, width, depth, ghost, noFloor) {
+  const sh = itemShape(L, pos, width, depth, type, kind), P = sh.pts.map(q => w2s(q[0], q[1])), inn = [-L.no[0], -L.no[1]];
+  ctx.save(); ctx.lineJoin = 'round';
+  ctx.beginPath(); P.forEach((q, k) => k ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.closePath();
+  ctx.fillStyle = type === 'door' ? 'rgba(239,179,0,.55)' : noFloor ? 'rgba(239,179,0,.18)' : 'rgba(239,179,0,.3)'; ctx.fill();
+  ctx.strokeStyle = COL.tape; ctx.lineWidth = 3; if (ghost) ctx.setLineDash([6, 4]); ctx.stroke(); ctx.setLineDash([]);
+  // засечки по краям и размеры: от угла, ширина, до угла
+  const A = w2s(sh.A[0], sh.A[1]), B = w2s(sh.B[0], sh.B[1]), s = view.s;
+  ctx.strokeStyle = COL.tape; ctx.lineWidth = 2;
+  for (const q of [A, B]) { ctx.beginPath(); ctx.moveTo(q[0] - inn[0] * 6, q[1] - inn[1] * 6); ctx.lineTo(q[0] + inn[0] * 26, q[1] + inn[1] * 26); ctx.stroke(); }
+  ctx.font = '600 11px ' + COL.mono; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+  const lab = (t0, t1, txt) => { if ((t1 - t0) * s < 28) return; const m = [L.P[0] + L.u[0] * (t0 + t1) / 2, L.P[1] + L.u[1] * (t0 + t1) / 2], q = w2s(m[0], m[1]), x = q[0] + inn[0] * 16, y = q[1] + inn[1] * 16; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.92)'; ctx.strokeText(txt, x, y + 0.5); ctx.fillStyle = '#17212b'; ctx.fillText(txt, x, y + 0.5); };
+  lab(0, sh.t0, mm(sh.t0)); lab(sh.t1, L.c, mm(L.c - sh.t1));
+  const mq = w2s((sh.A[0] + sh.B[0]) / 2, (sh.A[1] + sh.B[1]) / 2);
+  pillText(ctx, mm(sh.t1 - sh.t0) + (type === 'niche' ? '×' + mm(depth) : ''), mq[0] + inn[0] * 34 - 0, mq[1] + inn[1] * 34, COL.tape, '#3b2a00', 'center');
+  if (!ghost) {
+    for (const q of [A, B]) { ctx.beginPath(); ctx.arc(q[0], q[1], 8, 0, Math.PI * 2); ctx.fillStyle = COL.panel; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = COL.tape; ctx.stroke(); }
+    if (type === 'niche') { const b = w2s(sh.back[0], sh.back[1]); ctx.beginPath(); ctx.moveTo(b[0], b[1] - 9); ctx.lineTo(b[0] + 9, b[1]); ctx.lineTo(b[0], b[1] + 9); ctx.lineTo(b[0] - 9, b[1]); ctx.closePath(); ctx.fillStyle = COL.panel; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = COL.tape; ctx.stroke(); }
+  }
+  ctx.restore();
 }
 function midHandle(g, i) { const P = g.corners[i], Q = g.corners[(i + 1) % g.n], u = unitV(P, Q), n = g.sgn > 0 ? [u[1], -u[0]] : [-u[1], u[0]], h = g.arcs[i] || 0; return [(P[0] + Q[0]) / 2 + n[0] * h, (P[1] + Q[1]) / 2 + n[1] * h]; }
 function arrowHead(ctx, x, y, d) { const a = Math.atan2(d[1], d[0]); ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * 8, y + Math.sin(a) * 8); ctx.lineTo(x + Math.cos(a + 2.5) * 8, y + Math.sin(a + 2.5) * 8); ctx.lineTo(x + Math.cos(a - 2.5) * 8, y + Math.sin(a - 2.5) * 8); ctx.closePath(); ctx.fill(); }
@@ -706,6 +732,99 @@ function wallAt(sx, sy, rids) {
   }
   return hit;
 }
+/* ================= проёмы и ниши на карте: поставить, двигать, менять размер ================= */
+const DOOR_MIN = 300, NICHE_MIN = 100;
+function wallLine(g, i) { const P = g.corners[i], Q = g.corners[(i + 1) % g.n], u = unitV(P, Q); return { P, Q, u, c: dist(P, Q), no: g.sgn > 0 ? [u[1], -u[0]] : [-u[1], u[0]] }; }
+const straightWall = (g, i) => i >= 0 && i < g.n && Math.abs(g.arcs[i]) < 0.5 && dist(g.corners[i], g.corners[(i + 1) % g.n]) >= 200;
+/* выбранный проём или ниша: { type, rid, id } → данные и геометрия */
+function itemRef(it) {
+  it = it || UI.item; if (!it || !MODEL) return null;
+  const r = room(it.rid); if (!r) return null;
+  const x = ((it.type === 'door' ? r.doors : r.niches) || []).find(q => q.id === it.id); if (!x) return null;
+  const G = MODEL.geo[r.id]; if (!G || !G.g || !straightWall(G.g, x.wall | 0)) return null;
+  return { r, x, G, g: G.g, type: it.type, L: wallLine(G.g, x.wall | 0) };
+}
+/* контур на стене: A–B по линии стены, для ниши и выступа — прямоугольник вглубь или внутрь */
+function itemShape(L, pos, width, depth, type, kind) {
+  const t0 = clamp(pos, 0, L.c), t1 = clamp(pos + width, t0, L.c), at = (t, e) => [L.P[0] + L.u[0] * t + L.no[0] * e, L.P[1] + L.u[1] * t + L.no[1] * e];
+  const T = Math.max(0, num(S.set.wallT, 120)), k = type === 'door' ? T : kind === 'box' ? -depth : depth;
+  return { t0, t1, A: at(t0, 0), B: at(t1, 0), pts: [at(t0, 0), at(t0, k), at(t1, k), at(t1, 0)], back: at((t0 + t1) / 2, k) };
+}
+const shapeOf = ref => itemShape(ref.L, num(ref.x.pos), num(ref.x.width), num(ref.x.depth), ref.type, ref.x.kind);
+/* что под пальцем: проём (любой комнаты) или ниша/выступ */
+function itemHit(sx, sy) {
+  let best = 14, hit = null;
+  for (const r of S.rooms) {
+    const G = MODEL.geo[r.id]; if (!G || !G.g) continue;
+    for (const d of r.doors || []) {
+      const ref = itemRef({ type: 'door', rid: r.id, id: d.id }); if (!ref) continue; const sh = shapeOf(ref);
+      const a = w2s(sh.A[0], sh.A[1]), b = w2s(sh.B[0], sh.B[1]), e = w2s(sh.pts[2][0], sh.pts[2][1]), f = w2s(sh.pts[1][0], sh.pts[1][1]);
+      const dd = inPoly(sx, sy, [a, b, e, f]) ? 0 : Math.min(segDist(sx, sy, a, b), segDist(sx, sy, f, e));
+      if (dd < best) { best = dd; hit = { type: 'door', rid: r.id, id: d.id }; }
+    }
+    for (const x of r.niches || []) {
+      const ref = itemRef({ type: 'niche', rid: r.id, id: x.id }); if (!ref) continue; const sh = shapeOf(ref), sp = sh.pts.map(q => w2s(q[0], q[1]));
+      let dd = inPoly(sx, sy, sp) ? 0 : Infinity; for (let k = 0; k < 3; k++) dd = Math.min(dd, segDist(sx, sy, sp[k], sp[k + 1]));
+      if (dd < best || (dd === 0 && best === 0)) { best = dd; hit = { type: 'niche', rid: r.id, id: x.id }; }
+    }
+  }
+  return hit;
+}
+/* ручки выбранного: края (ширина) и задняя стенка ниши (глубина) */
+function itemHandles() {
+  const ref = itemRef(); if (!ref) return null; const sh = shapeOf(ref);
+  return { ref, sh, ends: [w2s(sh.A[0], sh.A[1]), w2s(sh.B[0], sh.B[1])], depth: ref.type === 'niche' ? w2s(sh.back[0], sh.back[1]) : null };
+}
+/* ближайшая прямая стена к точке (в пикселях экрана); rid — только эта комната */
+function nearestWall(w, rid, maxPx) {
+  let best = null;
+  for (const r of S.rooms) {
+    if (rid && r.id !== rid) continue; const G = MODEL.geo[r.id]; if (!G || !G.g) continue;
+    for (let i = 0; i < G.g.n; i++) {
+      if (!straightWall(G.g, i)) continue; const L = wallLine(G.g, i), t = clamp((w[0] - L.P[0]) * L.u[0] + (w[1] - L.P[1]) * L.u[1], 0, L.c);
+      const X = [L.P[0] + L.u[0] * t, L.P[1] + L.u[1] * t], d = dist(w, X) * view.s - (r.id === UI.room ? 2 : 0);
+      if (d < (maxPx || 1e9) && (!best || d < best.d)) best = { rid: r.id, i, t, d, L };
+    }
+  }
+  return best;
+}
+/* прилипание: к углам, к середине стены и к краям общей стены с соседней комнатой */
+function snapPos(rid, i, L, pos, width) {
+  const th = 12 / view.s, cands = [0, L.c - width, (L.c - width) / 2];
+  for (const a of MODEL.adj || []) if (a.a === rid && a.i === i) cands.push(a.o0, a.o1 - width, (a.o0 + a.o1 - width) / 2);
+  let best = null; for (const c of cands) { const d = Math.abs(c - pos); if (d < th && (best === null || d < Math.abs(best - pos))) best = c; }
+  return clamp(best !== null ? best : Math.round(pos / 10) * 10, 0, Math.max(0, L.c - width));
+}
+function snapEdge(rid, i, L, t) {
+  const th = 12 / view.s, cands = [0, L.c, L.c / 2];
+  for (const a of MODEL.adj || []) if (a.a === rid && a.i === i) cands.push(a.o0, a.o1);
+  let best = null; for (const c of cands) { const d = Math.abs(c - t); if (d < th && (best === null || d < Math.abs(best - t))) best = c; }
+  return clamp(best !== null ? best : Math.round(t / 10) * 10, 0, L.c);
+}
+/* проём после переноса: в общей стене с соседом — ведёт к нему (и не шире общей части), иначе — наружу */
+function doorLink(r, d) {
+  const geo = computeGeo(S), list = adjacency(S, geo).filter(a => a.a === r.id && a.i === (d.wall | 0)), mid = num(d.pos) + num(d.width) / 2;
+  const a = list.find(x => mid >= x.o0 && mid <= x.o1);
+  if (a) {
+    const span = a.o1 - a.o0; d.width = Math.min(num(d.width), Math.floor(span)); d.pos = Math.round(clamp(num(d.pos), a.o0, a.o1 - d.width));
+    d.to = a.b; d.auto = true; if (d.width >= span - 1) d.full = true; else delete d.full;
+    S.noDoor = (S.noDoor || []).filter(k => k !== pairKey(r.id, a.b));
+  } else {
+    const old = d.to; delete d.to; delete d.auto; delete d.full;
+    if (old && !S.rooms.some(o => (o.doors || []).some(q => q !== d && (q.to === old || (o.id === old && q.to === r.id))))) { S.noDoor = S.noDoor || []; const k = pairKey(r.id, old); if (!S.noDoor.includes(k)) S.noDoor.push(k); }
+  }
+}
+function itemText(ref) {
+  const x = ref.x, p = num(x.pos), w = num(x.width), rest = ref.L.c - p - w;
+  const name = ref.type === 'door' ? (x.full ? 'Проход' : 'Проём') : x.kind === 'box' ? 'Выступ' : 'Ниша';
+  return name + ' ' + mm(w) + (ref.type === 'niche' ? '×' + mm(x.depth) : '') + ' мм на стене ' + ((x.wall | 0) + 1) + ': от угла ' + mm(p) + ', до угла ' + mm(Math.max(0, rest)) + ' мм';
+}
+function selectItem(it, quiet) {
+  UI.item = it; UI.wall = null; UI.delArm = null; UI.room = it.rid; UI.open[it.type === 'door' ? 'doors' : 'niches'] = true;
+  renderPlanTab(); renderCtxbar(); draw(); PF.haptic('select');
+  const row = $('.orow[data-item="' + it.id + '"]'); if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  const ref = itemRef(); if (ref && !quiet) say(itemText(ref) + '. Тяните его по стене, за кружки на краях — ширина' + (ref.type === 'niche' ? ', за ромб — глубина' : '') + '.');
+}
 /* стена под пальцем (любая комната, дуги тоже); t — место касания вдоль стены */
 function wallHit(sx, sy) {
   let best = 18, hit = null;
@@ -735,7 +854,7 @@ function jointSegs(c, js) {
 }
 function selectWall(wh) {
   const r = room(wh.rid); if (!r) return;
-  UI.room = wh.rid; UI.wall = wh; UI.wallFocus = wh.i; UI.open.walls = true; UI.delArm = null; UI.addRoom = false;
+  UI.room = wh.rid; UI.wall = wh; UI.item = null; UI.wallFocus = wh.i; UI.open.walls = true; UI.delArm = null; UI.addRoom = false;
   renderPlanTab(); renderCtxbar(); draw(); saveUI(); PF.haptic('select');
   const c = $('.wcard[data-wi="' + wh.i + '"]'); if (c && c.scrollIntoView) c.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   say(wallText(r, wh.i) + '. Под картой: проём, ниша, выступ, дуга. Ромб на стене выгибает её.');
@@ -752,9 +871,28 @@ function startGesture() {
     if (res && !res.err) { const P = curP(), F = res.unit.parts[0].frame; Object.assign(gest, { type: 'pattern', P, F, offA: num(P.offA), offB: num(P.offB), kind: res.unit.kind }); }
   } else if (UI.mode === 'rooms') {
     if (UI.addTpl) { Object.assign(gest, { type: 'add', w0: snapPoint(s2w(p.x, p.y), null) }); return; }
+    // ставим проём или нишу: ведём пальцем по стене, отпускаем — встаёт
+    if (UI.place) { UI.ghost = ghostAt(s2w(p.x, p.y)); Object.assign(gest, { type: 'place' }); if (UI.ghost) say(ghostText(UI.ghost), null, true); draw(); return; }
     const h = R && rotHandle(R.id);
     if (h && Math.hypot(p.x - h.sx, p.y - h.sy) < 26) { const w = s2w(p.x, p.y); Object.assign(gest, { type: 'rrot', rid: R.id, C: h.C, x0: num(R.x0), y0: num(R.y0), a0: num(R.a0), phi0: Math.atan2(w[1] - h.C[1], w[0] - h.C[0]) }); return; }
-    // углы выбранной комнаты и ромб выбранной стены (дуга)
+    // ручки выбранного проёма или ниши: края — ширина, ромб — глубина
+    const ih = itemHandles();
+    if (ih) {
+      // маленький на экране проём: за край берём, только если палец ближе к краю, чем к середине
+      const len = Math.hypot(ih.ends[1][0] - ih.ends[0][0], ih.ends[1][1] - ih.ends[0][1]), rad = clamp(len * 0.35, 8, 20);
+      const mid = [(ih.ends[0][0] + ih.ends[1][0]) / 2, (ih.ends[0][1] + ih.ends[1][1]) / 2], dm = Math.hypot(p.x - mid[0], p.y - mid[1]);
+      for (const k of [0, 1]) { const de = Math.hypot(p.x - ih.ends[k][0], p.y - ih.ends[k][1]); if (de < rad && de < dm) { Object.assign(gest, { type: 'item-end', end: k, it: UI.item }); return; } }
+      if (ih.depth) { const dd = Math.hypot(p.x - ih.depth[0], p.y - ih.depth[1]); if (dd < 20 && dd < dm) { Object.assign(gest, { type: 'item-depth', it: UI.item }); return; } }
+    }
+    // углы выбранной комнаты
+    if (RG && RG.g) { let best = 22, ci = -1; RG.g.corners.forEach((q, i) => { const sc = w2s(q[0], q[1]), d = Math.hypot(sc[0] - p.x, sc[1] - p.y); if (d < best) { best = d; ci = i; } }); if (ci >= 0 && !(ih && itemHit(p.x, p.y))) { Object.assign(gest, { type: 'corner', i: ci, rid: R.id, g: RG.g }); return; } }
+    // проём или ниша под пальцем — тянем вдоль стены (у выбранной комнаты или уже выбранный)
+    const hit = itemHit(p.x, p.y), href = hit && itemRef(hit);
+    if (href && (hit.rid === UI.room || (UI.item && UI.item.id === hit.id) || (hit.type === 'door' && href.x.to === UI.room))) {
+      const w = s2w(p.x, p.y), t = (w[0] - href.L.P[0]) * href.L.u[0] + (w[1] - href.L.P[1]) * href.L.u[1];
+      Object.assign(gest, { type: 'item-move', it: hit, grab: t - num(href.x.pos) }); return;
+    }
+    // ромб выбранной стены (дуга)
     if (RG && RG.g) {
       const g = RG.g; let best = 22, hit = null;
       g.corners.forEach((q, i) => { const sc = w2s(q[0], q[1]), d = Math.hypot(sc[0] - p.x, sc[1] - p.y); if (d < best) { best = d; hit = { type: 'corner', i }; } });
@@ -825,6 +963,25 @@ cv.addEventListener('pointermove', e => {
     r.x0 = Math.round(q[0]); r.y0 = Math.round(q[1]); r.a0 = mod(na, 360);
     if (na % 15 === 0 && na !== gest.lastSnap) PF.haptic('select'); gest.lastSnap = na;
     say('Поворот: стена 1 под ' + mm(mod(na, 360)) + '° к горизонтали. У 0°, 45° и 90° комната прилипает.', null, true); invalidate();
+  } else if (gest.type === 'place') {
+    UI.ghost = ghostAt(s2w(p.x, p.y)); say(UI.ghost ? ghostText(UI.ghost) : 'Ведите пальцем по стене.', null, true); draw();
+  } else if (gest.type === 'item-move') {
+    const ref = itemRef(gest.it); if (!ref) return; const w = s2w(p.x, p.y), x = ref.x;
+    let L = ref.L, i = x.wall | 0, t = (w[0] - L.P[0]) * L.u[0] + (w[1] - L.P[1]) * L.u[1];
+    // перенос на другую стену той же комнаты: палец ближе к ней
+    const nw = nearestWall(w, ref.r.id, 48), dCur = segDist(w[0], w[1], L.P, L.Q) * view.s;
+    if (nw && nw.i !== i && nw.d + 8 < dCur) { x.wall = i = nw.i; L = nw.L; t = nw.t; gest.grab = Math.min(num(x.width), L.c) / 2; if (UI.wallFocus >= 0) UI.wallFocus = i; }
+    if (num(x.width) > L.c) x.width = Math.floor(L.c);
+    x.pos = Math.round(snapPos(ref.r.id, i, L, t - gest.grab, num(x.width))); if (ref.type === 'door') delete x.full;
+    const r2 = itemRef(gest.it); if (r2) say(itemText(r2), null, true); invalidate();
+  } else if (gest.type === 'item-end') {
+    const ref = itemRef(gest.it); if (!ref) return; const w = s2w(p.x, p.y), x = ref.x, L = ref.L, i = x.wall | 0, minW = ref.type === 'door' ? DOOR_MIN : NICHE_MIN;
+    const t = snapEdge(ref.r.id, i, L, (w[0] - L.P[0]) * L.u[0] + (w[1] - L.P[1]) * L.u[1]), t0 = num(x.pos), t1 = t0 + num(x.width);
+    if (gest.end === 0) { x.pos = Math.round(clamp(t, 0, t1 - minW)); x.width = Math.round(t1 - x.pos); } else x.width = Math.round(clamp(t, t0 + minW, L.c) - t0);
+    if (ref.type === 'door') delete x.full; say(itemText(ref), null, true); invalidate();
+  } else if (gest.type === 'item-depth') {
+    const ref = itemRef(gest.it); if (!ref) return; const w = s2w(p.x, p.y), L = ref.L, e = (w[0] - L.P[0]) * L.no[0] + (w[1] - L.P[1]) * L.no[1];
+    ref.x.depth = clamp(Math.round((ref.x.kind === 'box' ? -e : e) / 10) * 10, 20, 3000); say(itemText(ref), null, true); invalidate();
   } else if (gest.type === 'add') {
     const w1 = snapPoint(s2w(p.x, p.y), null); UI.addPrev = [gest.w0, w1];
     say(UI.addTpl === 'rect' ? 'Комната ' + mm(Math.abs(w1[0] - gest.w0[0])) + ' × ' + mm(Math.abs(w1[1] - gest.w0[1])) + ' мм' : 'Отпустите, где поставить комнату.', null, true); draw();
@@ -839,7 +996,7 @@ function placeRoomAt(tplId, w) {
 function finishAdd(r) {
   PF.haptic('medium');
   S.rooms.push(r); UI.room = r.id; UI.addTpl = null; UI.addPrev = null; UI.wall = null;
-  const msg = syncAutoDoors([r.id]);
+  const msg = syncAutoDoors([r.id]); recomputeNow(); selectNewDoor();
   afterRooms(msg || 'Комната «' + r.name + '» добавлена. Тяните её пальцем к соседней — прилипнет, и появится проём. Круглая ручка сверху — поворот.');
   renderCtxbar();
 }
@@ -861,14 +1018,39 @@ function endPointer(e) {
     }
     gest = null; return;
   }
+  if (g && g.type === 'place' && ptrs.size === 0) { placeGhost(); gest = null; return; }
   if (wasTap && g.type !== 'prot' && g.type !== 'rrot') selectAt(g.sx, g.sy);
   if (ptrs.size) startGesture(); else gest = null;
   if (g && g.moved && ['corner', 'bend', 'room', 'rrot'].includes(g.type)) {
     const msg = g.type === 'bend' ? '' : syncAutoDoors([g.rid]);
-    recomputeNow(); renderPlanTab(); renderCtxbar(); invalidate({ fast: true });
+    recomputeNow(); if (g.type === 'room') selectNewDoor(); renderPlanTab(); renderCtxbar(); invalidate({ fast: true });
     if (msg) { say(msg, 'ok'); PF.haptic('ok'); }
   }
   if (g && g.moved && (g.type === 'pattern' || g.type === 'prot')) { renderCtxbar(); invalidate({ fast: true }); }
+  if (g && g.moved && ['item-move', 'item-end', 'item-depth'].includes(g.type)) {
+    const ref = itemRef(g.it); if (ref && ref.type === 'door') doorLink(ref.r, ref.x);
+    UI.item = g.it; UI.room = g.it.rid; recomputeNow(); renderPlanTab(); renderCtxbar(); invalidate({ fast: true });
+    const r2 = itemRef(g.it); if (r2) say(itemText(r2) + (r2.type === 'door' ? (r2.x.to ? ' — проём в «' + roomName(r2.x.to) + '».' : ' — проём наружу (соседней комнаты за стеной нет).') : '.'), 'ok');
+  }
+}
+/* «призрак» при установке: ближайшая стена под пальцем, по центру пальца */
+function ghostAt(w) {
+  const nw = nearestWall(w, null, 56); if (!nw) return null;
+  const kind = UI.place, door = kind === 'door', pr = door ? { width: 900, depth: 0, kind: 'door' } : (NICHE_PRESET[kind] || NICHE_PRESET.radiator);
+  let width = Math.min(pr.width, Math.max(door ? DOOR_MIN : NICHE_MIN, Math.floor(nw.L.c - 100))), pos = nw.t - width / 2;
+  if (door) { const a = (MODEL.adj || []).find(x => x.a === nw.rid && x.i === nw.i && nw.t >= x.o0 && nw.t <= x.o1); if (a) { width = Math.min(width, Math.floor(a.o1 - a.o0)); pos = clamp(pos, a.o0, a.o1 - width); } }
+  pos = snapPos(nw.rid, nw.i, nw.L, pos, width);
+  return { rid: nw.rid, i: nw.i, pos, width, depth: pr.depth, type: door ? 'door' : 'niche', kind: pr.kind, L: nw.L };
+}
+function ghostText(gh) { const name = gh.type === 'door' ? 'Проём ' + mm(gh.width) : (gh.kind === 'box' ? 'Выступ ' : 'Ниша ') + mm(gh.width) + '×' + mm(gh.depth); return name + ' мм, «' + roomName(gh.rid) + '», стена ' + (gh.i + 1) + ': от угла ' + mm(gh.pos) + ', до угла ' + mm(Math.max(0, gh.L.c - gh.pos - gh.width)) + ' мм. Отпустите — встанет здесь.'; }
+function placeGhost() {
+  const gh = UI.ghost; UI.ghost = null;
+  if (!gh) { say('Ведите пальцем по стене — ' + (UI.place === 'door' ? 'проём' : 'ниша') + ' встанет там, где отпустите.', 'bad'); draw(); return; }
+  const r = room(gh.rid); let it;
+  if (gh.type === 'door') { const d = { id: newId('d'), wall: gh.i, pos: Math.round(gh.pos), width: Math.round(gh.width) }; r.doors = r.doors || []; r.doors.push(d); doorLink(r, d); it = { type: 'door', rid: r.id, id: d.id }; }
+  else { const pr = NICHE_PRESET[UI.place] || NICHE_PRESET.radiator, x = { id: newId('n'), kind: pr.kind, wall: gh.i, pos: Math.round(gh.pos), width: Math.round(gh.width), depth: pr.depth, floor: true, name: pr.name }; r.niches = r.niches || []; r.niches.push(x); it = { type: 'niche', rid: r.id, id: x.id }; }
+  UI.place = null; recomputeNow(); selectItem(it, true); invalidate({ fast: true }); PF.haptic('ok');
+  const ref = itemRef(it); say((ref ? itemText(ref) : 'Готово') + '. Тяните по стене, кружки на краях — ширина' + (gh.type === 'niche' ? ', ромб — глубина' : '') + '.', 'ok');
 }
 cv.addEventListener('pointerup', endPointer);
 cv.addEventListener('pointercancel', endPointer);
@@ -880,9 +1062,11 @@ cv.addEventListener('wheel', e => {
 function selectAt(x, y) {
   if (!MODEL) return; const w = s2w(x, y);
   if (UI.mode === 'rooms') {
-    UI.lastDoor = null;
+    const ih = itemHit(x, y); if (ih) { selectItem(ih); return; }
+    const hadItem = !!UI.item; UI.item = null;
     const wh = wallHit(x, y); if (wh) { selectWall(wh); return; }
-    const rid = roomAt(w), had = !!UI.wall; UI.wall = null; UI.delArm = null;
+    const rid = roomAt(w), had = !!UI.wall || hadItem; UI.wall = null; UI.delArm = null;
+    if (hadItem) renderRoomEditor();
     if (rid && rid !== UI.room) { UI.room = rid; renderPlanTab(); saveUI(); say('Выбрана «' + roomName(rid) + '». Тяните её пальцем, круглая ручка — поворот, кружки — углы.'); }
     else if (had) modeHint();
     renderCtxbar(); draw(); return;
@@ -914,12 +1098,24 @@ function selectAt(x, y) {
 /* полоса действий у карты: зависит от шага и от того, что выбрано */
 const BTN = (act, label, attrs, cls) => '<button class="btn small' + (cls ? ' ' + cls : '') + '" type="button" data-act="' + act + '"' + (attrs || '') + '>' + label + '</button>';
 function wallOk() { const w = UI.wall; if (!w || !MODEL) return null; const r = room(w.rid), G = r && MODEL.geo[r.id]; if (!G || !G.g || w.i >= G.g.n) return null; return { r, G, g: G.g, i: w.i, t: w.t || 0 }; }
-function doorRef(ref) { if (!ref) return null; const r = room(ref.rid), d = r && (r.doors || []).find(x => x.id === ref.id); return d ? { r, d } : null; }
 function renderCtxbar() {
   const el = $('#ctxbar'); if (!el) return; let h = '';
   if (UI.mode === 'rooms') {
-    const W = wallOk(), fresh = doorRef(UI.lastDoor);
-    if (UI.addTpl) {
+    const W = wallOk(), IR = itemRef();
+    const PLACE_KINDS = [['door', 'Проём'], ['radiator', 'Ниша под батарею'], ['wardrobe', 'Ниша под шкаф'], ['box', 'Выступ, короб']];
+    if (UI.place) {
+      h = '<span class="ctx-t"><b>Ведите пальцем по стене</b> — отпустите, где нужно</span>' +
+        PLACE_KINDS.map(([k, t]) => '<button class="chip" type="button" data-act="place-kind" data-v="' + k + '" aria-pressed="' + (UI.place === k) + '">' + t + '</button>').join('') + BTN('place-cancel', 'Отмена');
+    } else if (IR) {
+      const x = IR.x, door = IR.type === 'door', box = x.kind === 'box', shared = door && (MODEL.adj || []).some(a => a.a === IR.r.id && a.i === (x.wall | 0));
+      const cin = (label, f, v) => '<label class="inp ctxin"><span>' + label + '</span><input data-itf="' + f + '" inputmode="decimal" value="' + mm(v) + '" aria-label="' + label + '"><i>мм</i></label>';
+      h = BTN('item-back', ICON.back, ' aria-label="Готово" title="Готово"', 'ghost') +
+        (door ? '<span class="ctx-t"><b>' + (x.full ? 'Проход' : 'Проём') + '</b></span>' : '<div class="seg mini" role="group" aria-label="Ниша или выступ"><button type="button" data-act="item-kind" data-v="niche" aria-pressed="' + !box + '">Ниша</button><button type="button" data-act="item-kind" data-v="box" aria-pressed="' + box + '">Выступ</button></div>') +
+        cin('шир.', 'width', x.width) + (door ? '' : cin(box ? 'выступ' : 'глуб.', 'depth', x.depth)) + cin('от угла', 'pos', x.pos) +
+        (shared ? '<button class="chip" type="button" data-act="item-full" aria-pressed="' + !!x.full + '">Во всю стену</button>' : '') +
+        (!door && !box ? '<button class="chip" type="button" data-act="item-floor" aria-pressed="' + (x.floor === false) + '">Без пола</button>' : '') +
+        BTN('item-del', 'Удалить', '', 'danger');
+    } else if (UI.addTpl) {
       h = '<span class="ctx-t"><b>Нажмите на карту</b>' + (UI.addTpl === 'rect' ? ' или нарисуйте пальцем' : '') + '</span>' +
         TEMPLATES.map(t => '<button class="chip" type="button" data-act="add-tpl" data-tpl="' + t.id + '" aria-pressed="' + (UI.addTpl === t.id) + '">' + esc(t.name) + '</button>').join('') +
         BTN('add-cancel', 'Отмена');
@@ -930,8 +1126,7 @@ function renderCtxbar() {
         BTN('wall-arc', isArc ? 'Сделать прямой' : '⌒ Дуга') + (isArc ? '' : BTN('wall-cut', 'Угол здесь', ' title="Разделить стену в месте касания"'));
     } else {
       const r = curRoom();
-      if (fresh) h = '<span class="ctx-t">Проём <b>' + mm(fresh.d.width) + '</b></span>' + BTN('door-full', fresh.d.full ? 'Дверь 900' : 'Во всю стену') + BTN('door-remove', 'Убрать', '', 'danger') + '<span class="ctx-sep"></span>';
-      h += BTN('add-start', ICON.plus + 'Комната', '', 'primary') + (r ? '<span class="ctx-sep"></span>' + BTN('room-rotr', ICON.rot + '90°', ' title="Повернуть «' + esc(r.name) + '» на 90°"') + BTN('room-dup', ICON.copy + 'Копия', ' title="Копия «' + esc(r.name) + '»"') +
+      h = BTN('add-start', ICON.plus + 'Комната', '', 'primary') + BTN('place-start', ICON.plus + 'Проём', ' data-v="door" title="Поставить проём: ведите пальцем по стене"') + BTN('place-start', ICON.plus + 'Ниша', ' data-v="radiator" title="Поставить нишу или выступ: ведите пальцем по стене"') + (r ? '<span class="ctx-sep"></span>' + BTN('room-rotr', ICON.rot + '90°', ' title="Повернуть «' + esc(r.name) + '» на 90°"') + BTN('room-dup', ICON.copy + 'Копия', ' title="Копия «' + esc(r.name) + '»"') +
         (S.rooms.length > 1 ? BTN('room-del', UI.delArm === 'room:' + r.id ? 'Точно удалить?' : 'Удалить', '', 'danger') : '') : '');
     }
   } else if (UI.mode === 'pattern') {
@@ -962,7 +1157,7 @@ window.addEventListener('resize', () => { fadeMore($('#ctxbar')); fadeMore($('#s
 function setTab(t) {
   if (!MODE_OF[t]) t = 'plan';
   const changed = UI.tab !== t; UI.tab = t; UI.mode = MODE_OF[t];
-  if (changed) { UI.addTpl = null; UI.addPrev = null; UI.wall = null; UI.lastDoor = null; UI.delArm = null; if (t === 'plan') { UI.sel = null; UI.hl = null; renderPieceInfo(); } }
+  if (changed) { UI.addTpl = null; UI.addPrev = null; UI.wall = null; UI.item = null; UI.place = null; UI.ghost = null; UI.delArm = null; if (t === 'plan') { UI.sel = null; UI.hl = null; renderPieceInfo(); } }
   $$('.tab').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === t)));
   $$('.tabbody').forEach(b => { b.hidden = b.dataset.body !== t; });
   if (t === 'plan') renderPlanTab(); if (t === 'mat') renderMatTab(); if (t === 'pat') renderPatTab(); if (t === 'res') renderResults();
@@ -998,6 +1193,11 @@ document.addEventListener('input', e => {
   if (t.dataset.pk) { const v = readIn(t); if (v === undefined) return; const P = curP(); P[t.dataset.pk] = v; clearVariantMark(); if (['refRoom', 'refWall'].includes(t.dataset.pk)) { renderRefSelects(); recomputeNow(); centerTarget(UI.target, true); } if (t.dataset.pk === 'chevAngle') renderPatList(); invalidate(); return; }
   if (t.dataset.rk) { const r = curRoom(); const v = t.dataset.rk === 'name' ? t.value : readIn(t); if (v === undefined) return; r[t.dataset.rk] = v; invalidate(); return; }
   if (t.dataset.w !== undefined) { onWallInput(t); return; }
+  if (t.dataset.itf) {
+    const ref = itemRef(); if (!ref) return; const v = num(t.value, NaN); if (!Number.isFinite(v)) return; const x = ref.x, f = t.dataset.itf;
+    if (f === 'width') x.width = clamp(v, ref.type === 'door' ? DOOR_MIN : NICHE_MIN, ref.L.c); else if (f === 'pos') x.pos = clamp(v, 0, Math.max(0, ref.L.c - num(x.width))); else if (f === 'depth') x.depth = clamp(v, 20, 3000);
+    if (ref.type === 'door') delete x.full; invalidate(); return;
+  }
   if (t.dataset.rect) { const r = curRoom(), v = num(t.value, NaN); if (!(v >= 300) || !isRect(r)) return; (t.dataset.rect === 'L' ? [0, 2] : [1, 3]).forEach(i => { r.walls[i].len = v; }); invalidate(); return; }
   if (t.dataset.n !== undefined) { const x = (curRoom().niches || [])[+t.dataset.n]; if (!x) return; const f = t.dataset.nf, v = readIn(t); if (v === undefined) return; x[f] = f === 'wall' ? (v | 0) : v; if (f === 'floor' || f === 'wall') renderRoomEditor(); invalidate(); return; }
   if (t.dataset.d !== undefined) { const d = curRoom().doors[+t.dataset.d]; if (!d) return; const v = readIn(t); if (v === undefined) return; d[t.dataset.df] = t.dataset.df === 'wall' ? (v | 0) : v; delete d.full; invalidate(); return; }
@@ -1017,6 +1217,11 @@ function editorLater() { setTimeout(() => whenFree(() => { const ed = $('#roomEd
 document.addEventListener('change', e => {
   const t = e.target; if (!(t instanceof HTMLElement) || !t.closest('#roomEditor')) return;
   if (t.dataset.w !== undefined || t.dataset.rect || ['x0', 'y0', 'a0'].includes(t.dataset.rk)) { const msg = syncAutoDoors([curRoom().id]); recomputeNow(); renderRoomList(); renderRoomSums(); invalidate({ fast: true }); if (msg) { say(msg, 'ok'); whenFree(renderCtxbar); editorLater(); } }
+});
+document.addEventListener('change', e => {
+  const t = e.target; if (!(t instanceof HTMLElement) || !t.dataset.itf) return;
+  const ref = itemRef(); if (ref && ref.type === 'door') doorLink(ref.r, ref.x);
+  recomputeNow(); invalidate({ fast: true }); whenFree(() => { renderRoomEditor(); applyAcc(); }); const r2 = itemRef(); if (r2) say(itemText(r2), 'ok');
 });
 document.addEventListener('focusout', e => { if (editorDirty && e.target.closest && e.target.closest('#roomEditor')) editorLater(); });
 
@@ -1091,7 +1296,8 @@ function renderRoomEditor() {
   const rect = isRect(r), b = bboxOf(g.poly);
   const doors = (r.doors || []).map((d, j) => {
     const adjW = joints.filter(a => a.i === (d.wall | 0)), to = d.to && room(d.to) ? d.to : adjW[0] && adjW[0].b;
-    return '<div class="orow"><div class="whead"><b>Проём ' + (j + 1) + (to ? ' → «' + esc(roomName(to)) + '»' : '') + '</b>' +
+    return '<div class="orow' + (UI.item && UI.item.id === d.id ? ' sel' : '') + '" data-item="' + d.id + '"><div class="whead"><b>Проём ' + (j + 1) + (to ? ' → «' + esc(roomName(to)) + '»' : '') + '</b>' +
+      '<button class="chip" type="button" data-act="item-pick" data-type="door" data-id="' + d.id + '">На карте</button>' +
       (adjW.length ? '<button class="chip" type="button" data-act="door-full" data-d="' + j + '" aria-pressed="' + !!d.full + '">Во всю стену</button>' : '') +
       '<button class="icon" type="button" data-act="door-del" data-d="' + j + '" aria-label="Удалить проём ' + (j + 1) + '">' + ICON.del + '</button></div>' +
       '<div class="ofields">' + wallSelect('id="d' + j + 'wall" data-d="' + j + '" data-df="wall"', d.wall | 0, g, true) + fldIn('От угла', 'id="d' + j + 'pos" data-d="' + j + '" data-df="pos" data-num', mm(d.pos), 'мм') + fldIn('Ширина', 'id="d' + j + 'w" data-d="' + j + '" data-df="width" data-num', mm(d.width), 'мм') + '</div></div>';
@@ -1099,7 +1305,8 @@ function renderRoomEditor() {
   const niches = (r.niches || []).map((x, j) => {
     const ng = (g.niches || []).find(q => q.niche === x), box = x.kind === 'box';
     const state = !ng ? '<p class="note warn">Не помещается на стене ' + ((x.wall | 0) + 1) + ': проверьте «от угла» и ширину.</p>' : ng.off ? '<p class="note bad">Так не построить: два выступа в одном углу, выступ во всю стену или рядом с дугой.</p>' : '';
-    return '<div class="orow"><div class="whead"><b>' + (box ? 'Выступ ' : 'Ниша ') + (j + 1) + (x.name ? ' · ' + esc(x.name) : '') + '</b>' +
+    return '<div class="orow' + (UI.item && UI.item.id === x.id ? ' sel' : '') + '" data-item="' + x.id + '"><div class="whead"><b>' + (box ? 'Выступ ' : 'Ниша ') + (j + 1) + (x.name ? ' · ' + esc(x.name) : '') + '</b>' +
+      '<button class="chip" type="button" data-act="item-pick" data-type="niche" data-id="' + x.id + '">На карте</button>' +
       '<div class="seg mini" role="group" aria-label="Ниша или выступ"><button type="button" data-act="niche-kind" data-n="' + j + '" data-v="niche" aria-pressed="' + !box + '">Ниша</button><button type="button" data-act="niche-kind" data-n="' + j + '" data-v="box" aria-pressed="' + box + '">Выступ</button></div>' +
       '<button class="icon" type="button" data-act="niche-del" data-n="' + j + '" aria-label="Удалить ' + (box ? 'выступ' : 'нишу') + ' ' + (j + 1) + '">' + ICON.del + '</button></div>' +
       '<div class="ofields">' + wallSelect('id="n' + j + 'wall" data-n="' + j + '" data-nf="wall"', x.wall | 0, g, true) + fldIn('От угла', 'id="n' + j + 'pos" data-n="' + j + '" data-nf="pos" data-num', mm(x.pos), 'мм') +
@@ -1120,13 +1327,15 @@ function renderRoomEditor() {
       '<div class="walls" id="walls">' + walls + '</div>' +
       '<button class="btn" type="button" data-act="wall-add">' + ICON.plus + 'Добавить стену</button><p class="note" id="closureNote"></p>', 'sum-walls') +
     acc('doors', 'Проёмы', sm.doors,
-      (doors ? '<div class="olist">' + doors + '</div>' : '<p class="note">Проёмов нет. Поставьте соседнюю комнату вплотную — проём появится сам. Или нажмите на стену на карте → «Проём».</p>') +
-      '<button class="btn" type="button" data-act="door-add">' + ICON.plus + 'Добавить проём</button>' +
+      (doors ? '<div class="olist">' + doors + '</div>' : '<p class="note">Проёмов нет. Поставьте соседнюю комнату вплотную — проём появится сам.</p>') +
+      '<div class="row-btns"><button class="btn primary" type="button" data-act="place-start" data-v="door">' + ICON.plus + 'Поставить на карте</button><button class="btn" type="button" data-act="door-add">' + ICON.plus + 'Добавить цифрами</button></div>' +
+      '<p class="note"><b>Поставить на карте:</b> ведите пальцем по стене — проём едет следом и показывает расстояния до углов, отпустите там, где нужно. Готовый проём тяните по стене (можно на другую стену), кружки на краях меняют ширину.</p>' +
       '<p class="note">Через проём рисунок идёт в соседнюю комнату без порога. «Во всю стену» — проход на всю общую стену, тогда стена считается до угла соседней комнаты.</p>', 'sum-doors') +
     acc('niches', 'Ниши и выступы', sm.niches,
       (niches ? '<div class="olist">' + niches + '</div>' : '') +
-      '<div class="chips"><button class="chip add" type="button" data-act="niche-add" data-v="radiator">+ Ниша под батарею</button><button class="chip add" type="button" data-act="niche-add" data-v="wardrobe">+ Ниша под шкаф</button><button class="chip add" type="button" data-act="niche-add" data-v="box">+ Выступ, короб</button></div>' +
-      '<p class="note">Ниша уходит в стену, пол в неё заходит (снимите галочку, если под шкафом пол не кладут). Выступ — короб, колонна или стояк у стены: пол его обходит. «От угла» — от начала стены по часовой стрелке.</p>', 'sum-niches') +
+      '<p class="note"><b>Поставить на карте</b> — ведите пальцем по стене и отпустите там, где нужно:</p>' +
+      '<div class="chips"><button class="chip add" type="button" data-act="place-start" data-v="radiator">+ Ниша под батарею</button><button class="chip add" type="button" data-act="place-start" data-v="wardrobe">+ Ниша под шкаф</button><button class="chip add" type="button" data-act="place-start" data-v="box">+ Выступ, короб</button></div>' +
+      '<p class="note">Готовую нишу тяните по стене (можно на другую стену), кружки на краях — ширина, ромб на задней стенке — глубина. Ниша уходит в стену, пол в неё заходит (снимите галочку, если под шкафом пол не кладут). Выступ — короб, колонна или стояк: пол его обходит. «От угла» — от начала стены по часовой стрелке.</p>', 'sum-niches') +
     acc('own', 'Рисунок в комнате', sm.own,
       '<div class="seg" role="group" aria-label="Рисунок в комнате"><button type="button" data-act="own-set" data-v="0" aria-pressed="' + !r.own + '">Общий, сквозной</button><button type="button" data-act="own-set" data-v="1" aria-pressed="' + !!r.own + '">Свой</button></div>' +
       '<p class="note">' + (r.own ? 'У комнаты свой рисунок и своё положение. Настройте его на шаге «Рисунок», покрытие — на шаге «Покрытие».' : 'Рисунок продолжается из соседних комнат без сдвига — как при укладке без порогов.') + '</p>', 'sum-own') +
@@ -1180,8 +1389,11 @@ function placeAttached(walls, a0) {
 /* проёмы между приставленными комнатами: появляются сами, держатся в пределах общей стены */
 const pairKey = (a, b) => [a, b].sort().join('|');
 function doorWidthFor(span) { return span >= 1100 ? 900 : span >= 700 ? Math.round((span - 200) / 10) * 10 : Math.floor(span); }
+/* новый проём выделяем, только когда комнату приставили (перетащили или добавили) — не при повороте */
+let NEW_DOOR = null;
+function selectNewDoor() { if (NEW_DOOR && itemRef(NEW_DOOR)) { UI.item = NEW_DOOR; UI.wall = null; } NEW_DOOR = null; }
 function syncAutoDoors(changed) {
-  const set = new Set(changed), geo = computeGeo(S), adj = adjacency(S, geo), made = [], idx = id => S.rooms.findIndex(r => r.id === id);
+  NEW_DOOR = null; const set = new Set(changed), geo = computeGeo(S), adj = adjacency(S, geo), made = [], idx = id => S.rooms.findIndex(r => r.id === id);
   S.noDoor = S.noDoor || [];
   for (const r of S.rooms) {
     r.doors = (r.doors || []).filter(d => {
@@ -1208,8 +1420,8 @@ function syncAutoDoors(changed) {
     ra.doors = ra.doors || []; ra.doors.push(d); made.push({ ra, rb, d });
   }
   if (!made.length) return '';
-  const m = made[made.length - 1]; UI.lastDoor = { rid: m.ra.id, id: m.d.id };
-  return 'Комнаты «' + m.ra.name + '» и «' + m.rb.name + '» соединены: ' + (m.d.full ? 'проход во всю общую стену' : 'проём ' + mm(m.d.width) + ' мм') + '. Размеры стены делятся по стыку. Под картой — «Во всю стену» или «Убрать».';
+  const m = made[made.length - 1]; NEW_DOOR = { type: 'door', rid: m.ra.id, id: m.d.id };
+  return 'Комнаты «' + m.ra.name + '» и «' + m.rb.name + '» соединены: ' + (m.d.full ? 'проход во всю общую стену' : 'проём ' + mm(m.d.width) + ' мм') + '. Проём можно тянуть по стене, кружки на краях — ширина. Размеры стены делятся по стыку.';
 }
 function doorFull(r, d) {
   const geo = computeGeo(S), list = adjacency(S, geo).filter(a => a.a === r.id && a.i === (d.wall | 0)); if (!list.length) return;
@@ -1222,7 +1434,7 @@ function removeDoor(r, d) {
   const geo = computeGeo(S), a = adjacency(S, geo).find(x => x.a === r.id && x.i === (d.wall | 0) && num(d.pos) < x.o1 && num(d.pos) + num(d.width) > x.o0), to = d.to || (a && a.b);
   r.doors = (r.doors || []).filter(x => x !== d);
   if (to) { S.noDoor = S.noDoor || []; const k = pairKey(r.id, to); if (!S.noDoor.includes(k)) S.noDoor.push(k); }
-  if (UI.lastDoor && UI.lastDoor.id === d.id) UI.lastDoor = null;
+  if (UI.item && UI.item.id === d.id) UI.item = null;
 }
 function addDoorOn(r, i, t) {
   const g = (MODEL.geo[r.id] || {}).g || roomGeom(r), c = dist(g.corners[i], g.corners[(i + 1) % g.n]);
@@ -1231,7 +1443,7 @@ function addDoorOn(r, i, t) {
   if (a) { const span = a.o1 - a.o0; w = doorWidthFor(span); pos = a.o0 + (span - w) / 2; if (t !== undefined && span > w + 50) pos = clamp(t - w / 2, a.o0, a.o1 - w); S.noDoor = (S.noDoor || []).filter(k => k !== pairKey(r.id, a.b)); }
   else { w = Math.min(900, Math.max(300, c - 200)); pos = t === undefined ? (c - w) / 2 : clamp(t - w / 2, 0, c - w); }
   const d = { id: newId('d'), wall: i, pos: Math.round(pos), width: Math.round(w) }; if (a) { d.to = a.b; d.auto = true; if (w >= a.o1 - a.o0 - 1) d.full = true; }
-  r.doors = r.doors || []; r.doors.push(d); UI.lastDoor = { rid: r.id, id: d.id }; return d;
+  r.doors = r.doors || []; r.doors.push(d); UI.item = { type: 'door', rid: r.id, id: d.id }; UI.wall = null; return d;
 }
 function setArc(r, i, on) {
   const w = r.walls[i]; if (!w) return;
@@ -1253,24 +1465,24 @@ function addNicheOn(r, i, t, preset) {
   if (t === undefined) pos = p.kind === 'box' ? 0 : (c - width) / 2;
   else { pos = clamp(t - width / 2, 0, c - width); if (p.kind === 'box') { if (t < 600) pos = 0; else if (c - t < 600) pos = c - width; } }
   const x = { id: newId('n'), kind: p.kind, wall: i, pos: Math.round(pos), width, depth: p.depth, floor: true, name: p.name };
-  r.niches = r.niches || []; r.niches.push(x); return x;
+  r.niches = r.niches || []; r.niches.push(x); UI.item = { type: 'niche', rid: r.id, id: x.id }; UI.wall = null; return x;
 }
 
 /* ================= действия (клики) ================= */
 const ACT = {
   'go': b => setTab(b.dataset.v),
-  'room-select': b => { UI.room = b.dataset.room; UI.delArm = null; UI.wallFocus = -1; UI.wall = null; UI.lastDoor = null; renderPlanTab(); renderCtxbar(); draw(); saveUI(); },
+  'room-select': b => { UI.room = b.dataset.room; UI.delArm = null; UI.wallFocus = -1; UI.wall = null; UI.item = null; UI.place = null; renderPlanTab(); renderCtxbar(); draw(); saveUI(); },
   'room-add-open': () => { UI.addRoom = !UI.addRoom; $('#addRoomBox').hidden = !UI.addRoom; renderRoomList(); if (UI.addRoom) { const el = $('#newL'); if (el) el.focus(); } },
   'room-add-rect': () => { const L = num($('#newL').value), W = num($('#newW').value); if (!(L >= 300 && W >= 300)) { say('Впишите длину и ширину новой комнаты в миллиметрах.', 'bad'); return; } addRoom(rectWalls(L, W), 'Комната ' + (S.rooms.length + 1)); },
   'room-add-tpl': b => { const t = TEMPLATES.find(x => x.id === b.dataset.tpl); if (t) addRoom(t.make(), t.name); },
-  'room-dup': () => { const r = curRoom(), c = deep(r); c.id = newId('r'); c.name = r.name + ' (копия)'; c.doors = []; [c.x0, c.y0] = placeAttached(c.walls, c.a0); S.rooms.push(c); UI.room = c.id; UI.wall = null; const msg = syncAutoDoors([c.id]); view.fitted = false; afterRooms(msg || 'Копия добавлена рядом.'); fitView(); draw(); },
+  'room-dup': () => { const r = curRoom(), c = deep(r); c.id = newId('r'); c.name = r.name + ' (копия)'; c.doors = []; [c.x0, c.y0] = placeAttached(c.walls, c.a0); S.rooms.push(c); UI.room = c.id; UI.wall = null; const msg = syncAutoDoors([c.id]); recomputeNow(); selectNewDoor(); view.fitted = false; afterRooms(msg || 'Копия добавлена рядом.'); fitView(); draw(); },
   'room-rot': () => ACT['room-rotr'](),
   'room-rotr': () => { const r = curRoom(); rotateRoomBy(r, 90); const msg = syncAutoDoors([r.id]); afterRooms(msg || 'Комната повёрнута на 90° по часовой стрелке.'); },
-  'add-start': () => { UI.addTpl = 'rect'; UI.wall = null; UI.lastDoor = null; renderCtxbar(); draw(); say('Нажмите на карту, где поставить комнату, или нарисуйте прямоугольник пальцем. У соседней стены комната прилипнет, и появится проём.', null, true); },
+  'add-start': () => { UI.addTpl = 'rect'; UI.wall = null; UI.item = null; UI.place = null; renderCtxbar(); draw(); say('Нажмите на карту, где поставить комнату, или нарисуйте прямоугольник пальцем. У соседней стены комната прилипнет, и появится проём.', null, true); },
   'add-tpl': b => { UI.addTpl = b.dataset.tpl; renderCtxbar(); say('Нажмите на карту, где поставить «' + (TEMPLATES.find(t => t.id === b.dataset.tpl) || {}).name + '».', null, true); },
   'add-cancel': () => { UI.addTpl = null; UI.addPrev = null; renderCtxbar(); modeHint(); draw(); },
   'rot-step': b => { const c = dirCtx(UI.target); if (!c) return; const P = curP(); setDirection(P, fullAngle(P) + num(b.dataset.v), c); clearVariants(); syncPatInputs(); syncPatternUI(); renderCtxbar(); invalidate({ fast: true }); say('Угол к опорной стене: ' + f1(shownAngle(P)) + '°.'); },
-  'room-del': () => { const r = curRoom(); if (UI.delArm !== 'room:' + r.id) { UI.delArm = 'room:' + r.id; renderRoomEditor(); renderCtxbar(); return; } S.rooms = S.rooms.filter(x => x.id !== r.id); for (const o of S.rooms) o.doors = (o.doors || []).filter(d => d.to !== r.id || !d.auto); UI.delArm = null; UI.wall = null; UI.lastDoor = null; UI.room = S.rooms[0].id; afterRooms('Комната удалена.'); },
+  'room-del': () => { const r = curRoom(); if (UI.delArm !== 'room:' + r.id) { UI.delArm = 'room:' + r.id; renderRoomEditor(); renderCtxbar(); return; } S.rooms = S.rooms.filter(x => x.id !== r.id); for (const o of S.rooms) o.doors = (o.doors || []).filter(d => d.to !== r.id || !d.auto); UI.delArm = null; UI.wall = null; UI.item = null; UI.room = S.rooms[0].id; afterRooms('Комната удалена.'); },
   'room-rect': () => { const L = num($('#rL').value), W = num($('#rW').value); if (!(L >= 300 && W >= 300)) { say('Впишите длину и ширину в миллиметрах.', 'bad'); return; } const r = curRoom(); r.walls = rectWalls(L, W); r.doors = (r.doors || []).filter(d => d.wall < 4); r.niches = (r.niches || []).filter(x => x.wall < 4); const msg = syncAutoDoors([r.id]); afterRooms(msg); },
   'room-tpl': b => { const t = TEMPLATES.find(x => x.id === b.dataset.tpl); if (!t) return; const r = curRoom(); r.walls = t.make(); r.doors = []; r.niches = []; UI.wall = null; const msg = syncAutoDoors([r.id]); afterRooms(msg || 'Форма «' + t.name + '»: поправьте длины стен под свою комнату.'); },
   'wall-shape': b => { setArc(curRoom(), +b.dataset.w, b.dataset.v === 'arc'); UI.wallFocus = +b.dataset.w; renderRoomEditor(); renderCtxbar(); invalidate({ fast: true }); },
@@ -1287,8 +1499,17 @@ const ACT = {
   'wall-box': () => { const W = wallOk(); if (!W) return; const x = addNicheOn(W.r, W.i, W.t, 'box'); UI.open.niches = true; afterRooms('Выступ ' + mm(x.width) + '×' + mm(x.depth) + ' мм на стене ' + (W.i + 1) + (x.pos === 0 ? ', в углу' : '') + '. Размеры — в разделе «Ниши и выступы».'); focusLast('niches'); },
   'wall-arc': () => { const W = wallOk(); if (!W) return; setArc(W.r, W.i, Math.abs(W.g.arcs[W.i]) < 0.5); afterRooms(Math.abs(num(W.r.walls[W.i].arc)) >= 0.5 ? 'Стена ' + (W.i + 1) + ' — дуга. Тяните ромб на стене или впишите прогиб в разделе «Стены».' : 'Стена ' + (W.i + 1) + ' снова прямая.'); },
   'wall-cut': () => { const W = wallOk(); if (!W) return; const c = num(W.r.walls[W.i] && W.r.walls[W.i].len), t = Math.round(clamp(W.t, 100, c - 100) / 10) * 10; if (!(c > 300)) return; splitWall(W.r, W.i, t); UI.wall = null; UI.open.walls = true; UI.wallFocus = W.i + 1; afterRooms('Стена разделена: ' + mm(t) + ' + ' + mm(c - t) + ' мм. Тяните новый угол на карте или впишите угол в разделе «Стены».'); },
-  'door-full': b => { const ref = b.dataset.d !== undefined ? { r: curRoom(), d: curRoom().doors[+b.dataset.d] } : doorRef(UI.lastDoor); if (!ref || !ref.d) return; doorFull(ref.r, ref.d); ref.d.auto = true; afterRooms(ref.d.full ? 'Проход во всю общую стену: ' + mm(ref.d.width) + ' мм. Стена считается до угла соседней комнаты.' : 'Обычный проём ' + mm(ref.d.width) + ' мм по центру общей стены.'); },
-  'door-remove': () => { const ref = doorRef(UI.lastDoor); if (!ref) return; removeDoor(ref.r, ref.d); afterRooms('Проём убран. Стена между комнатами глухая — рисунок в соседнюю комнату не идёт.'); },
+  'door-full': b => { const ref = { r: curRoom(), d: curRoom().doors[+b.dataset.d] }; if (!ref.d) return; doorFull(ref.r, ref.d); ref.d.auto = true; afterRooms(ref.d.full ? 'Проход во всю общую стену: ' + mm(ref.d.width) + ' мм. Стена считается до угла соседней комнаты.' : 'Обычный проём ' + mm(ref.d.width) + ' мм по центру общей стены.'); },
+  // проём и ниша, которые человек ставит сам
+  'place-start': b => { UI.place = b.dataset.v || 'door'; UI.item = null; UI.wall = null; UI.addTpl = null; renderCtxbar(); draw(); say('Ведите пальцем по стене: ' + (UI.place === 'door' ? 'проём' : 'ниша') + ' едет следом и показывает расстояния до углов. Отпустите — встанет там.', null, true); syncTgBack(); },
+  'place-kind': b => { UI.place = b.dataset.v; renderCtxbar(); say('Ведите пальцем по стене и отпустите там, где нужно.', null, true); },
+  'place-cancel': () => { UI.place = null; UI.ghost = null; renderCtxbar(); modeHint(); draw(); syncTgBack(); },
+  'item-pick': b => { const it = { type: b.dataset.type, rid: curRoom().id, id: b.dataset.id }; if (!itemRef(it)) { say('Он на стене-дуге или за пределами стены — поправьте цифры.', 'bad'); return; } selectItem(it); },
+  'item-back': () => { UI.item = null; renderCtxbar(); renderRoomEditor(); applyAcc(); draw(); modeHint(); syncTgBack(); },
+  'item-del': () => { const ref = itemRef(); if (!ref) return; if (ref.type === 'door') removeDoor(ref.r, ref.x); else ref.r.niches = ref.r.niches.filter(q => q !== ref.x); UI.item = null; afterRooms(ref.type === 'door' ? 'Проём удалён.' + (ref.x.to ? ' Стена между комнатами глухая — рисунок в соседнюю комнату не идёт.' : '') : 'Удалено.'); },
+  'item-full': () => { const ref = itemRef(); if (!ref || ref.type !== 'door') return; doorFull(ref.r, ref.x); ref.x.auto = true; afterRooms(ref.x.full ? 'Проход во всю общую стену: ' + mm(ref.x.width) + ' мм. Стена считается до угла соседней комнаты.' : 'Обычный проём ' + mm(ref.x.width) + ' мм по центру общей стены.'); },
+  'item-kind': b => { const ref = itemRef(); if (!ref) return; ref.x.kind = b.dataset.v; afterRooms(b.dataset.v === 'box' ? 'Теперь это выступ: пол его обходит.' : 'Теперь это ниша: пол заходит в неё.'); },
+  'item-floor': () => { const ref = itemRef(); if (!ref) return; ref.x.floor = ref.x.floor === false; afterRooms(ref.x.floor === false ? 'В нише пол не кладём (например, под встроенным шкафом).' : 'Пол заходит в нишу.'); },
   'door-add': () => { const r = curRoom(), g = roomGeom(r); let wi = UI.wallFocus >= 0 && UI.wallFocus < g.n && Math.abs(g.arcs[UI.wallFocus]) < 0.5 ? UI.wallFocus : -1; if (wi < 0) { const a = (MODEL.adj || []).find(x => x.a === r.id); if (a) wi = a.i; } if (wi < 0) { let best = 0; for (let i = 0; i < g.n; i++) { const c = dist(g.corners[i], g.corners[(i + 1) % g.n]); if (Math.abs(g.arcs[i]) < 0.5 && c > best && c > 600) { best = c; wi = i; } } } if (wi < 0) { say('Нужна прямая стена длиннее 600 мм.', 'bad'); return; } const d = addDoorOn(r, wi); afterRooms('Проём ' + mm(d.width) + ' мм на стене ' + (wi + 1) + (d.to ? ' в «' + roomName(d.to) + '»' : '. Поставьте соседнюю комнату вплотную — рисунок пройдёт через проём.')); },
   'door-del': b => { const r = curRoom(), d = r.doors[+b.dataset.d]; if (!d) return; removeDoor(r, d); afterRooms('Проём удалён.'); },
   'niche-add': b => { const r = curRoom(), g = roomGeom(r); let wi = UI.wallFocus >= 0 && UI.wallFocus < g.n && Math.abs(g.arcs[UI.wallFocus]) < 0.5 ? UI.wallFocus : -1; if (wi < 0) for (let i = 0; i < g.n; i++) if (Math.abs(g.arcs[i]) < 0.5 && !(MODEL.adj || []).some(a => a.a === r.id && a.i === i)) { wi = i; break; } if (wi < 0) wi = 0; const x = addNicheOn(r, wi, undefined, b.dataset.v); afterRooms((x.kind === 'box' ? 'Выступ' : 'Ниша') + ' ' + mm(x.width) + '×' + mm(x.depth) + ' мм на стене ' + (wi + 1) + '. Поправьте стену и «от угла».'); focusLast('niches'); },
@@ -1332,7 +1553,7 @@ $('.app').addEventListener('click', e => { const b = e.target.closest('[data-act
 document.addEventListener('focusin', e => { const c = e.target.closest && e.target.closest('.wcard'); if (c) { const i = +c.dataset.wi; if (i !== UI.wallFocus) { UI.wallFocus = i; $$('.wcard').forEach(x => x.classList.toggle('sel', +x.dataset.wi === i)); } } });
 function addRoom(walls, name) {
   const [x, y] = placeAttached(walls, 0), r = newRoom(name, walls, x, y); S.rooms.push(r); UI.room = r.id; UI.addRoom = false; UI.wall = null;
-  const msg = syncAutoDoors([r.id]);
+  const msg = syncAutoDoors([r.id]); recomputeNow(); selectNewDoor();
   view.fitted = false; afterRooms(msg || 'Комната «' + name + '» добавлена. Тяните её на карте к соседней — прилипнет, и появится проём.'); recomputeNow(); fitView(); draw();
 }
 function afterRooms(msg) { recomputeNow(); renderPlanTab(); renderCtxbar(); if (UI.tab === 'pat') renderPatTab(); if (UI.tab === 'mat') renderMatTab(); invalidate({ fast: true }); if (msg) say(msg); }
@@ -1882,7 +2103,10 @@ $('#modal').addEventListener('click', async e => {
 });
 function openModal(html, kind) { const m = $('#modal'); $('#modalBox').innerHTML = html; m.dataset.kind = kind || ''; m.hidden = false; syncTgBack(); }
 function closeModal() { $('#modal').hidden = true; $('#modal').dataset.kind = ''; UI.delArm = null; SHARE = null; syncTgBack(); }
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#modal').hidden) closeModal(); });
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (!$('#modal').hidden) closeModal(); else if (UI.place) ACT['place-cancel'](); else if (UI.item) ACT['item-back'](); else if (UI.wall) ACT['wall-back']();
+});
 
 /* ================= верх, режимы, разделитель ================= */
 $('#btnProjects').addEventListener('click', openProjects);
@@ -1917,7 +2141,8 @@ function loadUI() { try { const u = JSON.parse(lsGet(KEY_UI) || 'null'); if (u) 
 function openHelp() {
   openModal('<header><h2>Как пользоваться</h2><button class="icon" data-close type="button" aria-label="Закрыть">' + ICON.del + '</button></header>' +
     '<div class="help"><ol>' +
-    '<li><b>Комнаты.</b> Впишите длину и ширину комнаты или нарисуйте её на карте: «+ Комната» под картой. Нажмите на стену — появятся кнопки: проём, ниша, выступ, дуга. Выбранную комнату тяните пальцем: у соседней стены она прилипнет, в общей стене сразу появится проём, а размер стены разделится по стыку.</li>' +
+    '<li><b>Комнаты.</b> Впишите длину и ширину комнаты или нарисуйте её на карте: «+ Комната» под картой. Выбранную комнату тяните пальцем: у соседней стены она прилипнет, в общей стене сразу появится проём, а размер стены разделится по стыку.</li>' +
+    '<li><b>Проёмы и ниши — куда сами решите.</b> «+ Проём» или «+ Ниша» под картой, потом ведите пальцем по стене: видно, сколько до каждого угла. Отпустите — встанет там. Готовый проём или нишу тяните по стене, кружки на краях — ширина, ромб — глубина ниши. Точные цифры — в полях под картой.</li>' +
     '<li><b>Покрытие.</b> Выберите вид и размер планки или впишите свой размер.</li>' +
     '<li><b>Рисунок.</b> Выберите рисунок. Тяните его пальцем по карте, стрелкой в центре меняйте направление. «Подобрать» найдёт положение без узких подрезок у стен.</li>' +
     '<li><b>Расчёт.</b> С чего начать, что приходит к каждой стене, ряды, подрезки и сколько покупать. Нажмите на доску на карте — покажу, как её пилить. Картинку плана можно сохранить в Фото.</li>' +
@@ -1940,7 +2165,7 @@ document.addEventListener('click', e => {
 let TG = null;
 function syncTgBack() {
   if (!TG || !PF.version('6.1')) return;
-  const need = !$('#modal').hidden || !$('#pieceInfo').hidden || !!UI.addTpl || !!UI.wall || UI.tab !== 'plan';
+  const need = !$('#modal').hidden || !$('#pieceInfo').hidden || !!UI.addTpl || !!UI.wall || !!UI.item || !!UI.place || UI.tab !== 'plan';
   try { if (need) TG.BackButton.show(); else TG.BackButton.hide(); } catch (e) { /* старый клиент */ }
 }
 function tgBack() {
@@ -1948,6 +2173,8 @@ function tgBack() {
   if (!$('#modal').hidden) closeModal();
   else if (!$('#pieceInfo').hidden) ACT['piece-close']();
   else if (UI.addTpl) ACT['add-cancel']();
+  else if (UI.place) ACT['place-cancel']();
+  else if (UI.item) ACT['item-back']();
   else if (UI.wall) ACT['wall-back']();
   else if (UI.tab !== 'plan') setTab(tabs[Math.max(0, tabs.indexOf(UI.tab) - 1)]);
   syncTgBack();
@@ -2007,5 +2234,5 @@ function start() {
   try { if ('serviceWorker' in navigator && location.protocol === 'https:' && window.top === window.self && !window.claude) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) { /* без офлайна */ }
 }
 start();
-if (/[?&]debug=1/.test(location.search)) window.__rd = { gizmo: () => { const g = gizmo(); return g && { tx: g.tx, ty: g.ty, cx: g.cx, cy: g.cy }; }, rotHandle: () => rotHandle(UI.room), state: () => JSON.parse(JSON.stringify(S)), ui: () => ({ room: UI.room, target: UI.target, mode: UI.mode, tab: UI.tab, wall: UI.wall, lastDoor: UI.lastDoor }), w2s: (x, y) => w2s(x, y), adj: () => MODEL.adj, geo: id => { const G = MODEL.geo[id]; return G && { poly: G.g.poly, corners: G.g.corners, doors: G.doors.map(d => [d.wall, d.t0, d.t1]), warn: G.warn || null, err: G.err || null }; } };
+if (/[?&]debug=1/.test(location.search)) window.__rd = { gizmo: () => { const g = gizmo(); return g && { tx: g.tx, ty: g.ty, cx: g.cx, cy: g.cy }; }, rotHandle: () => rotHandle(UI.room), state: () => JSON.parse(JSON.stringify(S)), ui: () => ({ room: UI.room, target: UI.target, mode: UI.mode, tab: UI.tab, wall: UI.wall, item: UI.item, place: UI.place }), w2s: (x, y) => w2s(x, y), adj: () => MODEL.adj, geo: id => { const G = MODEL.geo[id]; return G && { poly: G.g.poly, corners: G.g.corners, doors: G.doors.map(d => [d.wall, d.t0, d.t1]), warn: G.warn || null, err: G.err || null }; } };
 })();

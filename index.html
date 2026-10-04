@@ -123,6 +123,10 @@ button,input,select,textarea{font:inherit;color:inherit}
 .ctx-t b{color:var(--ink)}
 .ctx-sep{width:1px;height:24px;background:var(--line);margin:0 2px}
 .ctxbar .inp.ang{width:84px;background:var(--panel)}
+.ctxbar .ctxin{background:var(--panel);min-height:36px}
+.ctxin span{font-size:11.5px;color:var(--muted);padding-left:9px;white-space:nowrap}
+.ctxbar .ctxin input{width:58px;padding:6px 4px 6px 6px}
+.ctxbar .ctxin i{padding-right:7px}
 .ctxbar .seg{background:var(--panel)}
 .ctxbar .seg button{padding:6px 10px;white-space:nowrap;flex:none}
 .viewbtns{display:flex;gap:2px;flex:none}
@@ -292,6 +296,9 @@ details.acc > .accb{padding:0 16px 16px;display:grid;gap:12px;min-width:0}
 .corner .chip{padding:4px 9px;font-size:12.5px;min-height:32px}
 .orow{display:grid;gap:8px;padding:10px;border:1px solid var(--line);border-radius:10px}
 .orow .whead b{font-size:13px}
+.orow.sel{border-color:var(--tape);box-shadow:inset 0 0 0 1px var(--tape);background:var(--tape-soft)}
+.orow .whead{flex-wrap:wrap}
+.orow .whead .chip{padding:4px 10px;min-height:30px;font-size:12px}
 .ofields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;align-items:end}
 @media (max-width:420px){ .ofields{grid-template-columns:1fr 1fr} }
 .olist{display:grid;gap:8px}
