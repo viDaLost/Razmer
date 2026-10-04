@@ -389,6 +389,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-nume
 .modal .box h2{margin:0;font:700 16px var(--font-display);letter-spacing:.01em}
 @media (max-width:560px){ .modal{place-items:end stretch;padding:0} .modal .box{width:100%;max-height:92%;border-radius:16px 16px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px))} }
 .plist{display:grid;gap:6px}
+.modal .box h3.mh{margin:4px 0 0;font-size:11.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .pitem{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:9px 10px}
 .pitem b{font-size:14px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pitem small{color:var(--muted);font-size:12px}
@@ -408,6 +409,7 @@ textarea.code{width:100%;min-height:160px;box-sizing:border-box;font:12px/1.4 va
     <div class="proj"><input id="projName" aria-label="Название проекта" maxlength="80"></div>
     <div class="top-actions">
       <button class="icon" id="btnHelp" type="button" aria-label="Как пользоваться" title="Как пользоваться"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 015 0c0 1.7-2.5 2-2.5 4"/><circle cx="12" cy="17" r=".6" fill="currentColor"/></svg></button>
+      <button class="btn" id="btnPhoto" type="button" aria-label="Фото проекта" title="Фото проекта: план и расчёт одной картинкой"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><span class="t-long">Фото</span></button>
       <button class="btn" id="btnProjects" type="button" aria-label="Проекты"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h6l2 2h10v10H3z"/></svg><span class="t-long">Проекты</span></button>
       <button class="btn primary" id="btnSave" type="button" aria-label="Сохранить"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3h11l3 3v15H5z"/><path d="M8 3v6h8"/></svg><span class="t-long">Сохранить</span></button>
     </div>

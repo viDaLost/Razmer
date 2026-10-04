@@ -26,7 +26,7 @@ const ICON = {
   back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 5l-7 7 7 7"/></svg>',
   rot: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12a8 8 0 11-2.3-5.7"/><path d="M20 4v5h-5"/></svg>',
   copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="1"/><path d="M16 8V4H4v12h4"/></svg>',
-  img: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-8 8"/></svg>',
+  img: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>',
   share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M6 11H5v10h14V11h-1"/></svg>',
   star: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4 6.7 19.4l1.2-6L3.4 9.3l6-.7z"/></svg>',
 };
@@ -200,7 +200,7 @@ function unitGuides(res, geo) {
 let COL = {};
 function readColors() {
   const cs = getComputedStyle(document.documentElement), g = n => cs.getPropertyValue(n).trim();
-  COL = { canvas: g('--canvas'), grid: g('--grid'), wall: g('--wall'), gap: g('--gapzone'), schA: g('--sch-a'), schB: g('--sch-b'), seam: g('--seam'), chalk: g('--chalk'), onChalk: g('--on-chalk'), tape: g('--tape'), tapeSoft: g('--tape-soft'), bad: g('--bad'), badSoft: g('--bad-soft'), ink: g('--ink'), muted: g('--muted'), panel: g('--panel'), mono: g('--font-mono') || 'monospace', body: g('--font-body') || 'sans-serif' };
+  COL = { canvas: g('--canvas'), grid: g('--grid'), wall: g('--wall'), gap: g('--gapzone'), schA: g('--sch-a'), schB: g('--sch-b'), seam: g('--seam'), chalk: g('--chalk'), onChalk: g('--on-chalk'), tape: g('--tape'), tapeSoft: g('--tape-soft'), bad: g('--bad'), badSoft: g('--bad-soft'), ink: g('--ink'), muted: g('--muted'), panel: g('--panel'), line: g('--line'), mono: g('--font-mono') || 'monospace', body: g('--font-body') || 'sans-serif' };
 }
 const view = { s: 0.1, cx: 0, cy: 0, fitted: false };
 const cv = $('#plan'); let CW = 300, CH = 300, DPR = 1;
@@ -1141,7 +1141,7 @@ function renderCtxbar() {
         BTN('flipU', '⇄ Развернуть', ' title="Развернуть рисунок в обратную сторону"');
     }
   } else if (UI.tab === 'res') {
-    h = BTN('export-img', ICON.img + 'Картинка', '', 'primary') + BTN('export-share', ICON.share + 'Отправить расчёт') + BTN('export-copy', 'Скопировать');
+    h = BTN('export-img', ICON.img + 'Фото проекта', '', 'primary') + BTN('export-share', ICON.share + 'Отправить текстом') + BTN('export-copy', 'Скопировать');
   } else {
     const M = S.mat, c = catById(M.cat);
     h = '<span class="ctx-t">Покрытие: <b>' + esc(c.name.toLowerCase()) + ' ' + mm(num(M.L)) + '×' + mm(num(M.W)) + '</b> · ' + esc(patDef(S.floorPat.type).name.toLowerCase()) + '</span>';
@@ -1895,29 +1895,48 @@ function renderResults() {
       (res.groups.length > list.length ? '<p class="note">Ещё ' + (res.groups.length - list.length) + ' разных подрезок — смотрите на карте.</p>' : '') + '<p class="note">Нажмите на строку — такие куски подсветятся на плане.</p></div>';
   }
   h += '<div class="sec"><h3>Обозначения</h3><div class="legend"><span><i style="background:' + rgb((TONES[res.unit.mat.tone] || TONES.oak).c) + '"></i>целая</span><span><i style="background:' + COL.tape + '"></i>подрезка</span><span><i style="background:' + COL.badSoft + ';border-color:' + COL.bad + '"></i>узкая подрезка</span><span><i style="background:' + COL.chalk + ';height:3px"></i>линия разметки</span><span><i style="background:' + COL.gap + '"></i>зазор у стен</span></div></div>';
-  h += '<div class="sec"><h3>Сохранить и отправить</h3><div class="row-btns"><button class="btn primary" type="button" data-act="export-img">' + ICON.img + 'Картинка плана</button><button class="btn" type="button" data-act="export-share">' + ICON.share + (PF.inTG ? 'Отправить в чат' : 'Отправить расчёт') + '</button><button class="btn" type="button" data-act="export-copy">Скопировать расчёт</button><button class="btn" type="button" data-act="export-file">Файл проекта</button>' +
+  h += '<div class="sec"><h3>Сохранить и отправить</h3><button class="btn primary next" type="button" data-act="export-img"><span>Фото проекта — план и расчёт</span>' + ICON.img + '</button><div class="row-btns"><button class="btn" type="button" data-act="export-share">' + ICON.share + (PF.inTG ? 'Отправить в чат' : 'Отправить текстом') + '</button><button class="btn" type="button" data-act="export-copy">Скопировать текст</button>' +
     (PF.inTG ? '' : '<a class="btn" id="tgShare" href="' + esc(tgShareLink()) + '" target="_blank" rel="noopener">В Telegram</a>') + '</div>' +
-    (isPhone() ? '<p class="note">Картинка откроется в окне: нажмите «' + (PF.ios ? 'Сохранить в Фото' : 'Сохранить') + '» или удерживайте её пальцем.</p>' : '') + '</div>';
+    '<p class="note">Фото — одна картинка: план с подрезками, сколько покупать, комнаты и как укладывать.' + (isPhone() ? ' Откроется в окне: нажмите «' + (PF.ios ? 'Сохранить в Фото' : 'Сохранить') + '» или удерживайте картинку пальцем.' : '') + ' Перенести сам проект на другой телефон — «Проекты» → «Копия для переноса».</p></div>';
   el.innerHTML = h;
+}
+/* расчёт по частям: тот же текст идёт и в сообщение, и на фото проекта */
+function reportParts() {
+  const strip = x => x.replace(/<[^>]+>/g, ''), reserve = Math.max(0, num(S.set.reserve)), rooms = [], buy = [], units = [];
+  for (const r of S.rooms) {
+    const G = MODEL.geo[r.id]; if (G.err) { rooms.push({ title: r.name, lines: [G.err] }); continue; }
+    const wl = G.g.corners.map((p, i) => { const c = dist(p, G.g.corners[(i + 1) % G.g.n]), js = (MODEL.adj || []).filter(a => a.a === r.id && a.i === i); return (i + 1) + ') ' + (Math.abs(G.g.arcs[i]) >= 0.5 ? 'дуга ' : '') + mm(c) + (js.length ? ' (' + jointSegs(c, js).map(sg => mm(sg.len) + (sg.to ? ' общая с «' + roomName(sg.to) + '»' : '')).join(' + ') + ')' : ''); });
+    const lines = ['стены ' + wl.join(', ') + ' мм'];
+    if ((r.doors || []).length) lines.push('проёмы: ' + r.doors.map(d => 'ст. ' + ((d.wall | 0) + 1) + ' — ' + mm(d.width) + ' мм от угла ' + mm(d.pos) + (d.to && room(d.to) ? ' в «' + roomName(d.to) + '»' : '')).join('; '));
+    if ((r.niches || []).length) lines.push('ниши и выступы: ' + r.niches.map(x => (x.kind === 'box' ? 'выступ ' : 'ниша ') + mm(x.width) + '×' + mm(x.depth) + ' на ст. ' + ((x.wall | 0) + 1) + ' от угла ' + mm(x.pos) + (x.kind !== 'box' && x.floor === false ? ', без пола' : '')).join('; '));
+    rooms.push({ title: r.name + ': ' + fm2(Math.abs(area(G.g.poly))) + ' м²', lines });
+  }
+  for (const m of MODEL.mats) {
+    const M = m.M, br = Math.ceil(m.boards * (1 + reserve / 100)), isMain = M.key === E.unitMat(S.mat, S).key;
+    let packs = ''; if (isMain && num(S.set.perPack) > 0) packs = ', ' + Math.ceil(br / num(S.set.perPack)) + ' уп.'; else if (isMain && num(S.set.packM2) > 0) packs = ', ' + Math.ceil(br * M.L * M.W / 1e6 / num(S.set.packM2) - 1e-9) + ' уп.';
+    buy.push(catById(M.cat).name + ' ' + mm(M.L) + '×' + mm(M.W) + ': ' + m.boards + ' шт, с запасом ' + f1(reserve) + '% — ' + br + ' шт (' + fm2(br * M.L * M.W) + ' м²)' + packs);
+  }
+  for (const res of MODEL.units) {
+    const u = { title: res.unit.name + ' — ' + patDef(res.unit.P.type).name + ' ' + mm(res.unit.mat.L) + '×' + mm(res.unit.mat.W), steps: [], rows: [], groups: [], err: res.err || null };
+    if (!res.err) {
+      u.steps = unitSteps(res).map(strip);
+      if (res.rows) u.rows = res.rows.map((row, i) => 'Ряд ' + (i + 1) + (row.width < res.unit.mat.W - 0.5 ? ' (шир. ' + mm(row.width) + ')' : '') + ': ' + row.items.map(it => (it.full ? '' : '✂') + mm(it.len)).join(' | '));
+      else u.groups = res.groups.map(g => '×' + g.idx.length + (g.kind !== 'R' ? ' [' + g.kind + ']' : '') + ' ' + g.lines.join('; '));
+    }
+    units.push(u);
+  }
+  return { rooms, buy, units, reserve };
 }
 function reportText() {
   if (!MODEL) return '';
-  const strip = s => s.replace(/<[^>]+>/g, ''), lines = [S.name || 'Раскладка'], reserve = Math.max(0, num(S.set.reserve));
-  for (const r of S.rooms) {
-    const G = MODEL.geo[r.id]; if (G.err) { lines.push(r.name + ': ' + G.err); continue; }
-    const wl = G.g.corners.map((p, i) => { const c = dist(p, G.g.corners[(i + 1) % G.g.n]), js = (MODEL.adj || []).filter(a => a.a === r.id && a.i === i); return (i + 1) + ') ' + (Math.abs(G.g.arcs[i]) >= 0.5 ? 'дуга ' : '') + mm(c) + (js.length ? ' (' + jointSegs(c, js).map(sg => mm(sg.len) + (sg.to ? ' общая с «' + roomName(sg.to) + '»' : '')).join(' + ') + ')' : ''); });
-    lines.push(r.name + ': ' + fm2(Math.abs(area(G.g.poly))) + ' м², стены ' + wl.join(', ') + ' мм');
-    if ((r.doors || []).length) lines.push('  проёмы: ' + r.doors.map(d => 'ст. ' + ((d.wall | 0) + 1) + ' — ' + mm(d.width) + ' мм от угла ' + mm(d.pos) + (d.to && room(d.to) ? ' в «' + roomName(d.to) + '»' : '')).join('; '));
-    if ((r.niches || []).length) lines.push('  ниши и выступы: ' + r.niches.map(x => (x.kind === 'box' ? 'выступ ' : 'ниша ') + mm(x.width) + '×' + mm(x.depth) + ' на ст. ' + ((x.wall | 0) + 1) + ' от угла ' + mm(x.pos) + (x.kind !== 'box' && x.floor === false ? ', без пола' : '')).join('; '));
-  }
-  lines.push('', 'Покупать:');
-  for (const m of MODEL.mats) lines.push('— ' + catById(m.M.cat).name + ' ' + mm(m.M.L) + '×' + mm(m.M.W) + ': ' + m.boards + ' шт, с запасом ' + f1(reserve) + '% — ' + Math.ceil(m.boards * (1 + reserve / 100)) + ' шт');
-  for (const res of MODEL.units) {
-    lines.push('', '== ' + res.unit.name + ' — ' + patDef(res.unit.P.type).name + ' ==');
-    if (res.err) { lines.push(res.err); continue; }
-    unitSteps(res).forEach((s, i) => lines.push((i + 1) + '. ' + strip(s)));
-    if (res.rows) res.rows.forEach((row, i) => lines.push('Ряд ' + (i + 1) + (row.width < res.unit.mat.W - 0.5 ? ' (шир. ' + mm(row.width) + ')' : '') + ': ' + row.items.map(it => (it.full ? '' : '✂') + mm(it.len)).join(' | ')));
-    else res.groups.forEach(g => lines.push('×' + g.idx.length + (g.kind !== 'R' ? ' [' + g.kind + ']' : '') + ' ' + g.lines.join('; ')));
+  const R = reportParts(), lines = [S.name || 'Раскладка'];
+  for (const r of R.rooms) { lines.push(r.title + (r.lines.length ? ', ' + r.lines[0] : '')); for (const l of r.lines.slice(1)) lines.push('  ' + l); }
+  lines.push('', 'Покупать:'); for (const b of R.buy) lines.push('— ' + b);
+  for (const u of R.units) {
+    lines.push('', '== ' + u.title + ' ==');
+    if (u.err) { lines.push(u.err); continue; }
+    u.steps.forEach((x, i) => lines.push((i + 1) + '. ' + x));
+    lines.push(...(u.rows.length ? u.rows : u.groups));
   }
   return lines.join('\n');
 }
@@ -1953,40 +1972,65 @@ function openShareSheet(title, files, bodyHtml, note) {
 }
 function shareNow() {
   if (!SHARE) return;
-  navigator.share({ files: SHARE, title: S.name || 'Раскладка' }).then(() => { closeModal(); say('Готово.', 'ok'); PF.haptic('ok'); })
+  // картинку отдаём без подписи: с текстом iPhone может спрятать «Сохранить изображение»
+  const img = /^image\//.test(SHARE[0].type);
+  navigator.share(img ? { files: SHARE } : { files: SHARE, title: S.name || 'Раскладка' }).then(() => { closeModal(); say('Готово.', 'ok'); PF.haptic('ok'); })
     .catch(err => { if (err && err.name === 'AbortError') return; say(PF.ios ? 'Меню «Поделиться» не открылось. Нажмите и удерживайте картинку → «Сохранить в Фото».' : 'Не получилось поделиться. Нажмите и удерживайте картинку, чтобы сохранить.', 'bad'); });
+}
+/* фото проекта: шапка, план с подрезками, под ним — сколько покупать, комнаты и как укладывать */
+function wrapText(ctx, text, maxW) {
+  const out = []; let cur = '';
+  for (const w of String(text).split(' ')) { const t = cur ? cur + ' ' + w : w; if (cur && ctx.measureText(t).width > maxW) { out.push(cur); cur = w; } else cur = t; }
+  if (cur) out.push(cur); return out;
 }
 function planCanvas() {
   const b = floorBBox(); if (!b) return null;
-  const K = 2, W = 1000, head = 92, foot = 40, pad = 56, s = (W - 2 * pad) / Math.max(1, b.u1 - b.u0), H = Math.round(head + foot + 2 * pad + (b.v1 - b.v0) * s);
+  const K = 2, W = 1000, head = 92, pad = 56, x0 = 28, tw = W - 2 * x0, s = (W - 2 * pad) / Math.max(1, b.u1 - b.u0), planH = Math.round(2 * pad + (b.v1 - b.v0) * s);
+  // текст под планом: раскладываем по строкам заранее, чтобы знать высоту картинки
+  const R = reportParts(), items = [], meas = document.createElement('canvas').getContext('2d');
+  const F = { h: '700 17px ' + COL.body, b: '600 13.5px ' + COL.body, t: '400 13.5px ' + COL.body, s: '400 12px ' + COL.body };
+  const add = (font, text, indent, color, gap) => { meas.font = F[font]; wrapText(meas, text, tw - (indent || 0)).forEach((l, i) => items.push({ font, text: l, x: x0 + (indent || 0), color: color || 'ink', gap: i === 0 ? (gap || 0) : 0 })); };
+  add('h', 'Сколько покупать', 0, 'ink', 6); for (const l of R.buy) add('t', '— ' + l, 0);
+  add('h', 'Комнаты', 0, 'ink', 14); for (const r of R.rooms) { add('b', r.title, 0, 'ink', 4); for (const l of r.lines) add('t', l, 14, 'muted'); }
+  for (const u of R.units) {
+    add('h', 'Как укладывать: ' + u.title, 0, 'ink', 14);
+    if (u.err) { add('t', u.err, 0, 'bad'); continue; }
+    u.steps.forEach((x, i) => add('t', (i + 1) + '. ' + x, 0, 'ink', 2));
+  }
+  add('s', 'Жёлтым — подрезки, красным — узкие куски, синим — линия разметки. Размеры в мм. Ряды и подрезки по стенам — в приложении «Раскладка».', 0, 'muted', 14);
+  const LH = { h: 26, b: 21, t: 20, s: 18 }, textH = items.reduce((t, it) => t + LH[it.font] + it.gap, 0) + 34;
+  const H = head + planH + textH;
   const c = document.createElement('canvas'); c.width = W * K; c.height = H * K; const ctx = c.getContext('2d');
-  render(ctx, W, H, { s, cx: (b.u0 + b.u1) / 2, cy: (b.v0 + b.v1) / 2 - (head - foot) / 2 / s }, { k: K, style: UI.style, labels: true, live: false });
+  render(ctx, W, head + planH, { s, cx: (b.u0 + b.u1) / 2, cy: (b.v0 + b.v1) / 2 - head / 2 / s }, { k: K, style: UI.style, labels: true, live: false });
   ctx.setTransform(K, 0, 0, K, 0, 0); ctx.fillStyle = COL.panel; ctx.fillRect(0, 0, W, head - 16);
   ctx.fillStyle = COL.ink; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.font = '700 20px ' + COL.body; ctx.fillText(S.name || 'Раскладка', 24, 32);
   ctx.font = '500 13px ' + COL.body; ctx.fillStyle = COL.muted;
   ctx.fillText(MODEL.units.filter(r => !r.err).map(r => r.unit.name + ' — ' + patDef(r.unit.P.type).name + ' ' + mm(r.unit.mat.L) + '×' + mm(r.unit.mat.W)).join(' · ').slice(0, 150), 24, 54);
-  ctx.fillText(MODEL.mats.map(m => mm(m.M.L) + '×' + mm(m.M.W) + ': ' + m.boards + ' шт').join(' · ') + ' · зазор ' + mm(num(S.set.gap)) + ' мм', 24, 72);
-  ctx.font = '500 11px ' + COL.body; ctx.fillText('Жёлтым — подрезки, красным — узкие куски, синим — линия разметки. Размеры в мм.', 24, H - 14);
+  ctx.fillText(MODEL.mats.map(m => mm(m.M.L) + '×' + mm(m.M.W) + ': ' + m.boards + ' шт').join(' · ') + ' · зазор ' + mm(num(S.set.gap)) + ' мм · ' + new Date().toLocaleDateString('ru-RU'), 24, 72);
+  ctx.fillStyle = COL.panel; ctx.fillRect(0, head + planH, W, textH);
+  ctx.strokeStyle = COL.line || COL.grid; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, head + planH + 0.5); ctx.lineTo(W, head + planH + 0.5); ctx.stroke();
+  let y = head + planH + 14;
+  for (const it of items) { y += it.gap + LH[it.font]; ctx.font = F[it.font]; ctx.fillStyle = it.color === 'muted' ? COL.muted : it.color === 'bad' ? COL.bad : COL.ink; ctx.fillText(it.text, it.x, y - 6); }
   return c;
 }
 async function exportImage() {
   if (!MODEL) return; const c = planCanvas(); if (!c) return;
   const blob = await new Promise(res => c.toBlob(res, 'image/png')), name = fileSafe(S.name) + '.png';
   const r = blob ? await saveFile(name, blob, 'image/png') : 'fallback';
-  if (r === 'saved') { say('Картинка сохранена.', 'ok'); return; } if (r === 'declined') return;
+  if (r === 'saved') { say('Фото проекта сохранено.', 'ok'); return; } if (r === 'declined') return;
   if (SHARE_URL) { try { URL.revokeObjectURL(SHARE_URL); } catch (e) { /* уже нет */ } }
   SHARE_URL = blob ? URL.createObjectURL(blob) : c.toDataURL('image/png');
   const files = blob ? [new File([blob], name, { type: 'image/png' })] : null;
-  openShareSheet('Картинка плана', files, '<img alt="План раскладки" src="' + SHARE_URL + '">',
+  openShareSheet('Фото проекта', files, '<img alt="Фото проекта: план и расчёт" src="' + SHARE_URL + '">',
     PF.ios ? 'Если кнопки нет или она не сработала: нажмите и удерживайте картинку → <b>«Сохранить в Фото»</b>.' : PF.android ? 'Или нажмите и удерживайте картинку → «Скачать изображение».' : 'Нажмите и удерживайте картинку (на компьютере — правая кнопка мыши), чтобы сохранить или отправить.');
 }
 function projData() { return { app: 'raskladka', v: 2, name: S.name, mat: S.mat, set: S.set, rooms: S.rooms, floorPat: S.floorPat, noDoor: S.noDoor || [] }; }
 async function exportProject() {
   const json = JSON.stringify(projData(), null, 1), name = fileSafe(S.name) + '.json', r = await saveFile(name, json, 'application/json');
-  if (r === 'saved') { say('Файл проекта сохранён. Открыть: «Проекты» → «Открыть файл».', 'ok'); return; } if (r === 'declined') return;
+  if (r === 'saved') { say('Копия проекта (.json) сохранена. Открыть: «Проекты» → «Открыть копию».', 'ok'); return; } if (r === 'declined') return;
   let files = [new File([json], name, { type: 'application/json' })];
   if (!canShareFiles(files)) files = [new File([json], fileSafe(S.name) + '.txt', { type: 'text/plain' })];
-  openShareSheet('Файл проекта', files, '<textarea class="code" id="copyArea" readonly>' + esc(json) + '</textarea>', 'Сохраните файл или перешлите себе. Открыть: «Проекты» → «Открыть файл». Можно и скопировать текст ниже, а потом «Вставить текст».');
+  openShareSheet('Копия для переноса (.json)', files, '<textarea class="code" id="copyArea" readonly>' + esc(json) + '</textarea>', 'Это не картинка, а сам проект — чтобы открыть его на другом телефоне или компьютере: «Проекты» → «Открыть копию». Фото проекта — кнопка с камерой вверху. Можно и скопировать текст ниже, а потом «Вставить текст».');
 }
 /* текст расчёта: на телефоне — меню «Поделиться» (мессенджеры, заметки), в Telegram — выбор чата */
 function shareReport() {
@@ -2061,7 +2105,7 @@ async function saveProject(asNew) {
   if (asNew || !S.pid) S.pid = pidNew();
   const where = await Store.save({ id: S.pid, name: S.name || 'Без названия', updated: Date.now(), data: projData() });
   lsSet(KEY_DRAFT, JSON.stringify(S));
-  say(where === 'cloud' ? 'Проект сохранён в вашем аккаунте — откроется и на другом устройстве.' : where === 'tg' ? 'Проект сохранён в Telegram — откроется в этом боте на любом вашем устройстве.' : where === 'local' ? 'Проект сохранён в этом браузере.' : 'Не удалось сохранить: память браузера недоступна. Сохраните файл проекта.', where === 'fail' ? 'bad' : 'ok'); PF.haptic(where === 'fail' ? 'warn' : 'ok');
+  say((where === 'cloud' ? 'Проект сохранён в вашем аккаунте — откроется и на другом устройстве.' : where === 'tg' ? 'Проект сохранён в Telegram — откроется в этом боте на любом вашем устройстве.' : where === 'local' ? 'Проект сохранён в приложении.' : 'Не удалось сохранить: память недоступна. Сделайте копию для переноса в «Проектах».') + (where === 'fail' ? '' : ' Фото проекта — кнопка с камерой вверху.'), where === 'fail' ? 'bad' : 'ok'); PF.haptic(where === 'fail' ? 'warn' : 'ok');
   if (!$('#modal').hidden && $('#modal').dataset.kind === 'projects') openProjects();
 }
 function loadProject(data, pid) {
@@ -2080,7 +2124,8 @@ function openProjects() {
     '<p class="note">' + (Store.db ? 'Проекты хранятся в вашем аккаунте и видны только вам.' : Store.tg ? 'Проекты хранятся в облаке Telegram и открываются в этом боте на телефоне и компьютере.' : 'Проекты хранятся в этом браузере. Чтобы перенести на другое устройство, сохраните файл проекта.') + '</p>' +
     '<div class="row-btns"><button class="btn primary" data-pact="save" type="button">Сохранить текущий</button><button class="btn" data-pact="saveas" type="button">Сохранить как новый</button><button class="btn" data-pact="new" type="button">Новый проект</button></div>' +
     '<div class="plist">' + (rows || '<p class="note">Сохранённых проектов пока нет.</p>') + '</div>' +
-    '<div class="row-btns"><label class="btn" for="fileIn">Открыть файл</label><input type="file" id="fileIn" accept=".json,.txt,application/json,text/plain" hidden><button class="btn" data-pact="paste" type="button">Вставить текст</button><button class="btn" data-pact="export" type="button">Файл текущего</button></div>', 'projects');
+    '<h3 class="mh">Перенести на другое устройство</h3><p class="note">Копия (.json) — сам проект, чтобы открыть его на другом телефоне или компьютере. Это не картинка: фото проекта — кнопка с камерой вверху.</p>' +
+    '<div class="row-btns"><button class="btn" data-pact="export" type="button">Копия для переноса (.json)</button><label class="btn" for="fileIn">Открыть копию</label><input type="file" id="fileIn" accept=".json,.txt,application/json,text/plain" hidden><button class="btn" data-pact="paste" type="button">Вставить текст</button></div>', 'projects');
   $('#fileIn').addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => importText(String(rd.result)); rd.readAsText(f); });
 }
 function importText(t) {
@@ -2110,6 +2155,7 @@ document.addEventListener('keydown', e => {
 
 /* ================= верх, режимы, разделитель ================= */
 $('#btnProjects').addEventListener('click', openProjects);
+$('#btnPhoto').addEventListener('click', () => exportImage());
 $('#btnSave').addEventListener('click', () => saveProject(false));
 $('#btnHelp').addEventListener('click', openHelp);
 document.addEventListener('click', e => {
@@ -2145,7 +2191,8 @@ function openHelp() {
     '<li><b>Проёмы и ниши — куда сами решите.</b> «+ Проём» или «+ Ниша» под картой, потом ведите пальцем по стене: видно, сколько до каждого угла. Отпустите — встанет там. Готовый проём или нишу тяните по стене, кружки на краях — ширина, ромб — глубина ниши. Точные цифры — в полях под картой.</li>' +
     '<li><b>Покрытие.</b> Выберите вид и размер планки или впишите свой размер.</li>' +
     '<li><b>Рисунок.</b> Выберите рисунок. Тяните его пальцем по карте, стрелкой в центре меняйте направление. «Подобрать» найдёт положение без узких подрезок у стен.</li>' +
-    '<li><b>Расчёт.</b> С чего начать, что приходит к каждой стене, ряды, подрезки и сколько покупать. Нажмите на доску на карте — покажу, как её пилить. Картинку плана можно сохранить в Фото.</li>' +
+    '<li><b>Расчёт.</b> С чего начать, что приходит к каждой стене, ряды, подрезки и сколько покупать. Нажмите на доску на карте — покажу, как её пилить.</li>' +
+    '<li><b>Фото проекта.</b> Кнопка с камерой вверху — план с подрезками, сколько покупать, комнаты и как укладывать одной картинкой. На iPhone — «Сохранить в Фото».</li>' +
     '</ol></div>' +
     '<p class="note"><b>Карта:</b> один палец — двигать (на шаге «Рисунок» — двигать рисунок), два пальца — масштаб и сдвиг карты. Кнопка с рамкой под картой — вписать план в экран. Полоску между картой и панелью можно тянуть или нажать — карта станет крупнее.</p>' +
     '<button class="btn primary" data-close type="button">Понятно</button>', 'help');
